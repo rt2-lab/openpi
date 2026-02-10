@@ -35,7 +35,7 @@ def main(
     fps: int = 10,
     downsample_factor: int = 2,
     image_size: tuple[int, int] = (224, 224),
-    default_task: str = "perform the collaborative task",
+    default_task: str = "<control_mode> end effector <control_mode> perform the collaborative task",
     push_to_hub: bool = False,
 ):
     """

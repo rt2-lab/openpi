@@ -361,8 +361,11 @@ class LeRobotCollabDataConfig(DataConfigFactory):
     """Data config for the Collab (xArm) pick-and-place dataset.
 
     The dataset stores absolute desired poses as actions (7D pose + 1D gripper = 8D).
-    We apply a delta transform to convert the first 7 dims (pose) to deltas relative
-    to the current state, keeping the gripper command absolute.
+    Layout: [x, y, z, qx, qy, qz, qw, gripper].
+
+    Delta transform on xyz only (dims 0-2). Quaternion (dims 3-6) and gripper (dim 7)
+    stay absolute — quaternion subtraction is not a valid rotational delta, and the
+    pi0.5 base model was trained to predict target poses with quantile normalization.
     """
 
     # Default prompt when no per-episode task description is available.
@@ -392,9 +395,9 @@ class LeRobotCollabDataConfig(DataConfigFactory):
             outputs=[collab_policy.CollabOutputs()],
         )
 
-        # Actions are absolute desired poses → convert first 7 dims to deltas.
-        # make_bool_mask(7, -1): True for dims 0-6 (pose delta), False for dim 7 (gripper absolute).
-        delta_action_mask = _transforms.make_bool_mask(7, -1)
+        # Delta on xyz only; quaternion and gripper stay absolute.
+        # make_bool_mask(3, -5): True for dims 0-2 (xyz delta), False for dims 3-7.
+        delta_action_mask = _transforms.make_bool_mask(3, -5)
         data_transforms = data_transforms.push(
             inputs=[_transforms.DeltaActions(delta_action_mask)],
             outputs=[_transforms.AbsoluteActions(delta_action_mask)],
@@ -999,7 +1002,7 @@ _CONFIGS = [
         wandb_entity="RT2-DIFFUSE",
         wandb_group="OpenPI (Collab)",
         wandb_tags=("openpi", "collab", "pi0"),
-        model=pi0_config.Pi0Config(action_dim=8, action_horizon=16),
+        model=pi0_config.Pi0Config(action_dim=32, action_horizon=16),
         data=LeRobotCollabDataConfig(
             repo_id="local/collab",
             base_config=DataConfig(prompt_from_task=True),
@@ -1013,7 +1016,7 @@ _CONFIGS = [
         wandb_entity="RT2-DIFFUSE",
         wandb_group="OpenPI (Collab)",
         wandb_tags=("openpi", "collab", "pi0_fast"),
-        model=pi0_fast.Pi0FASTConfig(action_dim=8, action_horizon=16, max_token_len=180),
+        model=pi0_fast.Pi0FASTConfig(action_dim=32, action_horizon=16, max_token_len=180),
         data=LeRobotCollabDataConfig(
             repo_id="local/collab",
             base_config=DataConfig(prompt_from_task=True),
@@ -1027,7 +1030,7 @@ _CONFIGS = [
         wandb_entity="RT2-DIFFUSE",
         wandb_group="OpenPI (Collab)",
         wandb_tags=("openpi", "collab", "pi05"),
-        model=pi0_config.Pi0Config(pi05=True, action_dim=8, action_horizon=16),
+        model=pi0_config.Pi0Config(pi05=True, action_dim=32, action_horizon=16),
         data=LeRobotCollabDataConfig(
             repo_id="local/collab",
             base_config=DataConfig(prompt_from_task=True),
