@@ -369,7 +369,8 @@ class LeRobotCollabDataConfig(DataConfigFactory):
     """
 
     # Default prompt when no per-episode task description is available.
-    default_prompt: str = ""
+    default_prompt: str = "<control_mode> end effector <control_mode> perform the collaborative task"
+
 
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
