@@ -18,6 +18,7 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git git-lfs linux-headers-generic build-essential clang curl \
+    libgl1-mesa-glx libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy from cache instead of linking (container filesystem)
