@@ -126,6 +126,6 @@ gpus_minimum_memory = 24576
 **Full fine-tuning** (needs ~70+ GB VRAM):
 ```
 # In train.sub (default settings work):
-gpus_minimum_memory = 40960
+gpus_minimum_memory = 81920 
 +GPUJobLength = "long"
 ```
