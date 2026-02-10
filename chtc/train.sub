@@ -20,7 +20,7 @@
 # CHTC uses "universe = container" with nvidia-docker support.
 # Replace <dockerhub_user> with your DockerHub username.
 universe                = container
-container_image         = docker://lexu27/openpi_train:v3
+container_image         = docker://lexu27/openpi_train:v4
 
 # Your CHTC NetID (used for /staging paths). Override at submit-time if desired:
 #   condor_submit chtc/train.sub netid=lpxu
@@ -33,7 +33,7 @@ executable              = chtc/run_train.sh
 # These can be overridden at submit time:
 #   condor_submit train.sub config_name=pi0_collab exp_name=my_exp
 config_name             = pi05_collab
-exp_name                = chtc_train_03
+exp_name                = chtc_train_04
 arguments               = $(config_name) $(exp_name)
 
 # --- File transfer ---
