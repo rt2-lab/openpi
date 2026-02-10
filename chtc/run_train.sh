@@ -72,6 +72,16 @@ if [ -d /opt/openpi-cache ]; then
     cp -rn /opt/openpi-cache/* "$OPENPI_DATA_HOME/" 2>/dev/null || true
 fi
 
+# Fail fast if tokenizer cache is missing. This avoids a later opaque GCS 401.
+TOKENIZER_PATH="$OPENPI_DATA_HOME/big_vision/paligemma_tokenizer.model"
+if [ ! -f "$TOKENIZER_PATH" ]; then
+    echo "ERROR: Missing tokenizer file: $TOKENIZER_PATH"
+    echo "       The container image likely does not include /opt/openpi-cache/big_vision/paligemma_tokenizer.model."
+    echo "       Rebuild and push the updated Docker image, then resubmit."
+    exit 2
+fi
+echo "Tokenizer cache found: $TOKENIZER_PATH"
+
 # --- Extract the dataset ---
 # The submit file transfers collab_dataset.tar.gz into the working dir.
 # This tarball should contain the LeRobot dataset at the path that matches
