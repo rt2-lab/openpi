@@ -27,6 +27,7 @@ ENV UV_PROJECT_ENVIRONMENT=/.venv
 
 # Install Python and project dependencies from the lock file
 RUN uv venv --python 3.11.9 $UV_PROJECT_ENVIRONMENT
+RUN chmod -R a+rX $UV_PROJECT_ENVIRONMENT
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
