@@ -16,9 +16,10 @@ CONFIG_NAME="${1:?Usage: run_train.sh <config_name> <exp_name>}"
 EXP_NAME="${2:?Usage: run_train.sh <config_name> <exp_name>}"
 CKPT_DIR="checkpoints/${CONFIG_NAME}/${EXP_NAME}"
 
-# Use the pre-built venv directly; avoids uv's Python inspection which
-# fails under Condor's non-root UID.
-export PATH="/.venv/bin:$PATH"
+# Absolute path to Python in the container's pre-built venv.
+# Using absolute paths so we never depend on PATH being set correctly
+# by Condor, the NVIDIA entrypoint, or the container ENV.
+PYTHON=/.venv/bin/python
 
 # Ensure checkpoints_out.tar.gz always exists so Condor output transfer won't hold.
 package_on_exit() {
@@ -72,13 +73,16 @@ else
     echo "WARNING: $DATASET_TAR not found, assuming dataset is already available"
 fi
 
+# All scripts live in /app inside the container image.
+cd /app
+
 # --- Compute normalization stats (idempotent, skips if already present) ---
 echo "Computing normalization statistics..."
-python scripts/compute_norm_stats.py --config-name "$CONFIG_NAME"
+$PYTHON scripts/compute_norm_stats.py --config-name "$CONFIG_NAME"
 
 # --- Run training ---
 echo "Starting training..."
-python scripts/train.py "$CONFIG_NAME" \
+$PYTHON scripts/train.py "$CONFIG_NAME" \
     --exp-name="$EXP_NAME" \
     --overwrite
 
