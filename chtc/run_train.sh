@@ -67,7 +67,7 @@ if [ -f "$DATASET_TAR" ]; then
     mkdir -p "$HF_LEROBOT_HOME/local"
     tar -xzf "$DATASET_TAR" -C "$HF_LEROBOT_HOME/local"
     echo "Dataset extracted to $HF_LEROBOT_HOME"
-    ls -laR "$HF_LEROBOT_HOME/local/collab" | head -20
+    ls "$HF_LEROBOT_HOME/local/collab"
     rm -f "$DATASET_TAR"
 else
     echo "WARNING: $DATASET_TAR not found, assuming dataset is already available"
