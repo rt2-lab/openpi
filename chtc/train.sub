@@ -85,7 +85,7 @@ Requirements            = (Target.HasCHTCStaging == true)
 
 # --- Environment ---
 # Let JAX use 90% of GPU memory
-environment             = "XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 HF_HOME=$_CONDOR_SCRATCH_DIR/.cache/hf OPENPI_DATA_HOME=$_CONDOR_SCRATCH_DIR/.cache/openpi WANDB_DIR=$_CONDOR_SCRATCH_DIR/.cache/wandb"
+environment             = "HOME=$_CONDOR_SCRATCH_DIR XDG_CACHE_HOME=$_CONDOR_SCRATCH_DIR/.cache UV_CACHE_DIR=$_CONDOR_SCRATCH_DIR/.cache/uv XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 HF_HOME=$_CONDOR_SCRATCH_DIR/.cache/hf OPENPI_DATA_HOME=$_CONDOR_SCRATCH_DIR/.cache/openpi WANDB_DIR=$_CONDOR_SCRATCH_DIR/.cache/wandb"
 
 # Stream logs in real time for monitoring
 stream_output           = True
