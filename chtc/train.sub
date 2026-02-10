@@ -70,7 +70,7 @@ request_disk            = 100GB
 
 # Require A100-80GB or better (capability >= 8.0, VRAM >= 40 GB)
 gpus_minimum_capability = 8.0
-gpus_minimum_memory     = 81920
+gpus_minimum_memory     = 72000  # Default to megabytes
 
 # --- GPU Lab policies ---
 +WantGPULab             = true
