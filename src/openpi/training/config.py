@@ -18,6 +18,7 @@ import openpi.models.pi0_config as pi0_config
 import openpi.models.pi0_fast as pi0_fast
 import openpi.models.tokenizer as _tokenizer
 import openpi.policies.aloha_policy as aloha_policy
+import openpi.policies.collab_policy as collab_policy
 import openpi.policies.droid_policy as droid_policy
 import openpi.policies.libero_policy as libero_policy
 import openpi.shared.download as _download
@@ -347,6 +348,60 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
         model_transforms = ModelTransformFactory()(model_config)
 
         # We return all data transforms for training and inference. No need to change anything here.
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=model_transforms,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class LeRobotCollabDataConfig(DataConfigFactory):
+    """Data config for the Collab (xArm) pick-and-place dataset.
+
+    The dataset stores absolute desired poses as actions (7D pose + 1D gripper = 8D).
+    We apply a delta transform to convert the first 7 dims (pose) to deltas relative
+    to the current state, keeping the gripper command absolute.
+    """
+
+    # Default prompt when no per-episode task description is available.
+    default_prompt: str = ""
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        # Repack: map LeRobot dataset keys → keys expected by CollabInputs.
+        # The LeRobot dataset keys come from the convert script's `features` dict
+        # and the `add_frame` call (prefixed with "observation/" by LeRobot for non-action fields).
+        repack_transform = _transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "observation/mount_image": "mount_image",
+                        "observation/gripper_image": "gripper_image",
+                        "observation/state": "state",
+                        "actions": "actions",
+                        "prompt": "prompt",
+                    }
+                )
+            ]
+        )
+
+        data_transforms = _transforms.Group(
+            inputs=[collab_policy.CollabInputs(model_type=model_config.model_type)],
+            outputs=[collab_policy.CollabOutputs()],
+        )
+
+        # Actions are absolute desired poses → convert first 7 dims to deltas.
+        # make_bool_mask(7, -1): True for dims 0-6 (pose delta), False for dim 7 (gripper absolute).
+        delta_action_mask = _transforms.make_bool_mask(7, -1)
+        data_transforms = data_transforms.push(
+            inputs=[_transforms.DeltaActions(delta_action_mask)],
+            outputs=[_transforms.AbsoluteActions(delta_action_mask)],
+        )
+
+        model_transforms = ModelTransformFactory()(model_config)
+
         return dataclasses.replace(
             self.create_base_config(assets_dirs, model_config),
             repack_transforms=repack_transform,
@@ -929,6 +984,39 @@ _CONFIGS = [
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
         num_train_steps=20_000,
+    ),
+    #
+    # Collab (xArm) fine-tuning configs.
+    #
+    TrainConfig(
+        name="pi0_collab",
+        model=pi0_config.Pi0Config(action_dim=8, action_horizon=16),
+        data=LeRobotCollabDataConfig(
+            repo_id="local/collab",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=30_000,
+    ),
+    TrainConfig(
+        name="pi0_fast_collab",
+        model=pi0_fast.Pi0FASTConfig(action_dim=8, action_horizon=16, max_token_len=180),
+        data=LeRobotCollabDataConfig(
+            repo_id="local/collab",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_fast_base/params"),
+        num_train_steps=30_000,
+    ),
+    TrainConfig(
+        name="pi05_collab",
+        model=pi0_config.Pi0Config(pi05=True, action_dim=8, action_horizon=16),
+        data=LeRobotCollabDataConfig(
+            repo_id="local/collab",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=30_000,
     ),
     #
     # Debugging configs.
