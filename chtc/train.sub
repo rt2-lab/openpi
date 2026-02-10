@@ -22,6 +22,10 @@
 universe                = container
 container_image         = docker://<dockerhub_user>/openpi_train:latest
 
+# Your CHTC NetID (used for /staging paths). Override at submit-time if desired:
+#   condor_submit chtc/train.sub netid=lpxu
+netid                   = lpxu
+
 # --- Executable ---
 executable              = chtc/run_train.sh
 
@@ -35,6 +39,11 @@ arguments               = $(config_name) $(exp_name)
 # --- File transfer ---
 should_transfer_files   = YES
 when_to_transfer_output = ON_EXIT
+
+# Secure W&B auth:
+# - Do NOT put WANDB_API_KEY in this file.
+# - Instead, export it in your submit shell (or ~/.bashrc) and let HTCondor pass it through.
+getenv                  = True
 
 # Input: LeRobot dataset from /staging (adjust path for your netid)
 # The dataset tarball will be extracted inside the job by run_train.sh.
@@ -69,14 +78,14 @@ gpus_minimum_memory     = 81920
 +GPUJobLength           = "long"
 
 # Enable checkpointing / backfill on research-group GPUs for extra capacity
-+is_resumable           = true
++is_resumable           = false 
 
 # Require /staging access
 Requirements            = (Target.HasCHTCStaging == true)
 
 # --- Environment ---
 # Let JAX use 90% of GPU memory
-environment             = "XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 HF_HOME=$_CONDOR_SCRATCH_DIR/.cache/hf OPENPI_DATA_HOME=$_CONDOR_SCRATCH_DIR/.cache/openpi"
+environment             = "XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 HF_HOME=$_CONDOR_SCRATCH_DIR/.cache/hf OPENPI_DATA_HOME=$_CONDOR_SCRATCH_DIR/.cache/openpi WANDB_DIR=$_CONDOR_SCRATCH_DIR/.cache/wandb"
 
 # Stream logs in real time for monitoring
 stream_output           = True

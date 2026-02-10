@@ -579,6 +579,11 @@ class TrainConfig:
 
     # If true, will enable wandb logging.
     wandb_enabled: bool = True
+    # Optional W&B metadata. Keep secrets (WANDB_API_KEY) in environment, not here.
+    wandb_entity: str | None = None
+    wandb_group: str | None = None
+    # Use tuple (not list) to keep frozen dataclass safe.
+    wandb_tags: tuple[str, ...] = ()
 
     # Used to pass metadata to the policy server.
     policy_metadata: dict[str, Any] | None = None
@@ -990,6 +995,10 @@ _CONFIGS = [
     #
     TrainConfig(
         name="pi0_collab",
+        project_name="Collaborative Policy",
+        wandb_entity="RT2-DIFFUSE",
+        wandb_group="OpenPI (Collab)",
+        wandb_tags=("openpi", "collab", "pi0"),
         model=pi0_config.Pi0Config(action_dim=8, action_horizon=16),
         data=LeRobotCollabDataConfig(
             repo_id="local/collab",
@@ -1000,6 +1009,10 @@ _CONFIGS = [
     ),
     TrainConfig(
         name="pi0_fast_collab",
+        project_name="Collaborative Policy",
+        wandb_entity="RT2-DIFFUSE",
+        wandb_group="OpenPI (Collab)",
+        wandb_tags=("openpi", "collab", "pi0_fast"),
         model=pi0_fast.Pi0FASTConfig(action_dim=8, action_horizon=16, max_token_len=180),
         data=LeRobotCollabDataConfig(
             repo_id="local/collab",
@@ -1010,6 +1023,10 @@ _CONFIGS = [
     ),
     TrainConfig(
         name="pi05_collab",
+        project_name="Collaborative Policy",
+        wandb_entity="RT2-DIFFUSE",
+        wandb_group="OpenPI (Collab)",
+        wandb_tags=("openpi", "collab", "pi05"),
         model=pi0_config.Pi0Config(pi05=True, action_dim=8, action_horizon=16),
         data=LeRobotCollabDataConfig(
             repo_id="local/collab",

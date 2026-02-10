@@ -52,6 +52,21 @@ Edit `chtc/train.sub`:
 - Replace `<dockerhub_user>` with your Docker Hub username
 - Set your `netid`
 
+#### Secure W&B setup (matches your `aiml_ws` style)
+
+OpenPI now supports `wandb_entity`, `wandb_group`, and `wandb_tags` via `TrainConfig` (and the provided `pi*_collab` configs already set these to match your `aiml_ws` defaults).
+
+**Do not** hardcode `WANDB_API_KEY` into `train.sub` (submit files are plain text). Instead, set it in your submit shell environment:
+
+```bash
+# On the CHTC submit node (e.g. submit1), in your shell:
+export WANDB_API_KEY="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+```
+
+Because `train.sub` sets `getenv = True`, HTCondor will pass `WANDB_API_KEY` into the job environment.
+
+If you want this to persist across logins, add it to a private file like `~/.bashrc` (chmod 600) on the submit node.
+
 Then from the CHTC submit node:
 
 ```bash
