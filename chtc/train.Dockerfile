@@ -24,6 +24,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV UV_LINK_MODE=copy
 # venv outside project so mounted volumes don't clobber it
 ENV UV_PROJECT_ENVIRONMENT=/.venv
+# Install Python to a world-readable location (default /root/.local is 700)
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv-python
 
 # Install Python and project dependencies from the lock file
 RUN uv venv --python 3.11.9 $UV_PROJECT_ENVIRONMENT
@@ -42,5 +44,7 @@ RUN GIT_LFS_SKIP_SMUDGE=1 uv pip install -e .
 
 # CHTC runs containers as a non-root user; make the venv readable.
 RUN chmod -R a+rX $UV_PROJECT_ENVIRONMENT
+
+ENV PATH="/.venv/bin:$PATH"
 
 CMD ["/bin/bash"]

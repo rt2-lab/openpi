@@ -14,6 +14,25 @@ set -euo pipefail
 
 CONFIG_NAME="${1:?Usage: run_train.sh <config_name> <exp_name>}"
 EXP_NAME="${2:?Usage: run_train.sh <config_name> <exp_name>}"
+CKPT_DIR="checkpoints/${CONFIG_NAME}/${EXP_NAME}"
+
+# Use the pre-built venv directly; avoids uv's Python inspection which
+# fails under Condor's non-root UID.
+export PATH="/.venv/bin:$PATH"
+
+# Ensure checkpoints_out.tar.gz always exists so Condor output transfer won't hold.
+package_on_exit() {
+    local rc=$?
+    echo "Packaging outputs (exit code: ${rc})..."
+    if [ -d "$CKPT_DIR" ]; then
+        tar -czf checkpoints_out.tar.gz -C checkpoints "${CONFIG_NAME}/${EXP_NAME}"
+        echo "Checkpoints packaged: $(du -sh checkpoints_out.tar.gz | cut -f1)"
+    else
+        tar -czf checkpoints_out.tar.gz --files-from /dev/null
+        echo "WARNING: no checkpoint dir found; wrote empty archive"
+    fi
+}
+trap package_on_exit EXIT
 
 echo "============================================"
 echo "OpenPI CHTC Training Job"
@@ -55,25 +74,13 @@ fi
 
 # --- Compute normalization stats (idempotent, skips if already present) ---
 echo "Computing normalization statistics..."
-uv run scripts/compute_norm_stats.py --config-name "$CONFIG_NAME"
+python scripts/compute_norm_stats.py --config-name "$CONFIG_NAME"
 
 # --- Run training ---
 echo "Starting training..."
-uv run scripts/train.py "$CONFIG_NAME" \
+python scripts/train.py "$CONFIG_NAME" \
     --exp-name="$EXP_NAME" \
     --overwrite
-
-# --- Package checkpoints for output transfer ---
-echo "Packaging checkpoints..."
-CKPT_DIR="checkpoints/${CONFIG_NAME}/${EXP_NAME}"
-if [ -d "$CKPT_DIR" ]; then
-    tar -czf checkpoints_out.tar.gz -C checkpoints "${CONFIG_NAME}/${EXP_NAME}"
-    echo "Checkpoints packaged: $(du -sh checkpoints_out.tar.gz | cut -f1)"
-else
-    echo "WARNING: Checkpoint directory $CKPT_DIR not found"
-    # Create an empty tarball so transfer_output_files doesn't fail
-    tar -czf checkpoints_out.tar.gz --files-from /dev/null
-fi
 
 echo "============================================"
 echo "Training complete at $(date)"

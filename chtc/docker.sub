@@ -1,0 +1,18 @@
+# HTC Submit File
+
+# Provide HTCondor with the name of the Docker container
+container_image = docker://lexu27/openpi_train:latest
+universe = container
+
+executable = myExecutable.sh
+transfer_input_files = other_job_files
+
+log = job.log
+error = job.err
+output = job.out
+
+request_cpus = 1
+request_memory = 4GB
+request_disk = 2GB
+
+queue
