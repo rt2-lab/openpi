@@ -54,6 +54,12 @@ export OPENPI_DATA_HOME="${_CONDOR_SCRATCH_DIR:-.}/.cache/openpi"
 export XLA_PYTHON_CLIENT_MEM_FRACTION="${XLA_PYTHON_CLIENT_MEM_FRACTION:-0.9}"
 mkdir -p "$HF_HOME" "$HF_DATASETS_CACHE" "$OPENPI_DATA_HOME"
 
+# Seed scratch cache with assets pre-downloaded during Docker build
+# (e.g., PaliGemma tokenizer) so jobs don't need GCS access.
+if [ -d /opt/openpi-cache ]; then
+    cp -rn /opt/openpi-cache/* "$OPENPI_DATA_HOME/" 2>/dev/null || true
+fi
+
 # --- Extract the dataset ---
 # The submit file transfers collab_dataset.tar.gz into the working dir.
 # This tarball should contain the LeRobot dataset at the path that matches

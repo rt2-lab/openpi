@@ -43,8 +43,12 @@ COPY . /app
 # Install the project itself
 RUN GIT_LFS_SKIP_SMUDGE=1 uv pip install -e .
 
-# CHTC runs containers as a non-root user; make the venv readable.
-RUN chmod -R a+rX $UV_PROJECT_ENVIRONMENT
+# Bundle the PaliGemma tokenizer (GCS bucket is no longer publicly accessible).
+# The file was cached locally from a previous download.
+COPY chtc/assets/paligemma_tokenizer.model /opt/openpi-cache/big_vision/paligemma_tokenizer.model
+
+# CHTC runs containers as a non-root user; make everything readable.
+RUN chmod -R a+rX $UV_PROJECT_ENVIRONMENT /opt/openpi-cache
 
 ENV PATH="/.venv/bin:$PATH"
 
