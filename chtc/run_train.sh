@@ -61,28 +61,25 @@ mkdir -p "$HF_HOME" "$HF_DATASETS_CACHE" "$OPENPI_DATA_HOME"
 DATASET_TAR="collab_dataset.tar.gz"
 if [ -f "$DATASET_TAR" ]; then
     echo "Extracting dataset from $DATASET_TAR..."
-    # Extract into HF_LEROBOT_HOME so LeRobot can find it
     export HF_LEROBOT_HOME="${_CONDOR_SCRATCH_DIR:-.}/lerobot_data"
-    mkdir -p "$HF_LEROBOT_HOME"
-    tar -xzf "$DATASET_TAR" -C "$HF_LEROBOT_HOME"
+    # Tarball contains "collab/..." but repo_id is "local/collab",
+    # so extract into the "local/" subdirectory.
+    mkdir -p "$HF_LEROBOT_HOME/local"
+    tar -xzf "$DATASET_TAR" -C "$HF_LEROBOT_HOME/local"
     echo "Dataset extracted to $HF_LEROBOT_HOME"
-    ls -la "$HF_LEROBOT_HOME"
-    # Free up scratch disk
+    ls -laR "$HF_LEROBOT_HOME/local/collab" | head -20
     rm -f "$DATASET_TAR"
 else
     echo "WARNING: $DATASET_TAR not found, assuming dataset is already available"
 fi
 
-# All scripts live in /app inside the container image.
-cd /app
-
 # --- Compute normalization stats (idempotent, skips if already present) ---
 echo "Computing normalization statistics..."
-$PYTHON scripts/compute_norm_stats.py --config-name "$CONFIG_NAME"
+$PYTHON /app/scripts/compute_norm_stats.py --config-name "$CONFIG_NAME"
 
 # --- Run training ---
 echo "Starting training..."
-$PYTHON scripts/train.py "$CONFIG_NAME" \
+$PYTHON /app/scripts/train.py "$CONFIG_NAME" \
     --exp-name="$EXP_NAME" \
     --overwrite
 
