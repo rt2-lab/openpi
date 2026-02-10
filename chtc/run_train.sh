@@ -25,12 +25,24 @@ PYTHON=/.venv/bin/python
 package_on_exit() {
     local rc=$?
     echo "Packaging outputs (exit code: ${rc})..."
+
+    # Diagnostics: show where we are and what exists
+    echo "  cwd: $(pwd)"
+    echo "  CKPT_DIR: $CKPT_DIR"
+    echo "  _CONDOR_SCRATCH_DIR: ${_CONDOR_SCRATCH_DIR:-unset}"
+    ls -la checkpoints/"${CONFIG_NAME}" 2>/dev/null || echo "  checkpoints/${CONFIG_NAME}/ does not exist"
+    echo "  Disk usage:"
+    df -h . 2>/dev/null || true
+    du -sh checkpoints 2>/dev/null || echo "  no checkpoints/ dir"
+
     if [ -d "$CKPT_DIR" ]; then
+        # Remove incomplete checkpoint temps (async writes that were interrupted)
+        find "$CKPT_DIR" -name '*.orbax-checkpoint-tmp-*' -exec rm -rf {} + 2>/dev/null || true
         tar -czf checkpoints_out.tar.gz -C checkpoints "${CONFIG_NAME}/${EXP_NAME}"
         echo "Checkpoints packaged: $(du -sh checkpoints_out.tar.gz | cut -f1)"
     else
         tar -czf checkpoints_out.tar.gz --files-from /dev/null
-        echo "WARNING: no checkpoint dir found; wrote empty archive"
+        echo "WARNING: no checkpoint dir found at '$CKPT_DIR'; wrote empty archive"
     fi
 }
 trap package_on_exit EXIT

@@ -65,8 +65,8 @@ error                   = logs/train_$(Cluster).err
 # Adjust these based on your config (LoRA vs full).
 request_gpus            = 1
 request_cpus            = 8
-request_memory          = 64GB
-request_disk            = 100GB
+request_memory          = 128GB
+request_disk            = 150GB
 
 # Require A100-80GB or better (capability >= 8.0, VRAM >= 40 GB)
 gpus_minimum_capability = 8.0
