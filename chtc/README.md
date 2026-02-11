@@ -16,7 +16,7 @@ Train pi0/pi0.5 models on [CHTC GPU Lab](https://chtc.cs.wisc.edu/uw-research-co
 │  LOCAL MACHINE   │     │      CHTC        │     │  LOCAL MACHINE  │
 │                  │     │                  │     │                 │
 │ 1. Convert data  │────>│ 3. Train on GPU  │────>│ 5. Serve policy │
-│ 2. Stage to CHTC │     │    (A100/H100)   │     │    (local GPU)  │
+│ 2. Stage to CHTC │     │    (H100/H200)   │     │    (local GPU)  │
 │                  │     │ 4. Save ckpts    │     │ 6. Run robot    │
 └─────────────────┘     └──────────────────┘     └─────────────────┘
 ```
@@ -86,7 +86,7 @@ condor_tail <id>  # stream stdout
 ### 5. Pull checkpoints and run inference locally
 
 ```bash
-./chtc/pull_checkpoints.sh <netid> <config_name> <exp_name> <cluster_id>
+./chtc/pull_checkpoints.sh <netid> <config_name> <exp_name> <cluster_id> [process_id]
 
 uv run scripts/serve_policy.py policy:checkpoint \
     --policy.config=<config_name> \

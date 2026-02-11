@@ -4,10 +4,11 @@
 # for running inference on your lab GPU.
 #
 # Usage:
-#   ./chtc/pull_checkpoints.sh <netid> <config_name> <exp_name> <cluster_id> [local_dir]
+#   ./chtc/pull_checkpoints.sh <netid> <config_name> <exp_name> <cluster_id> [process_id] [local_dir]
 #
 # Example:
 #   ./chtc/pull_checkpoints.sh lsanchez pi05_collab pi05_123456 123456
+#   ./chtc/pull_checkpoints.sh lsanchez pi05_collab pi05_123456 123456 0
 #   # Then serve locally:
 #   uv run scripts/serve_policy.py policy:checkpoint \
 #       --policy.config=pi05_collab \
@@ -16,14 +17,15 @@
 
 set -euo pipefail
 
-NETID="${1:?Usage: pull_checkpoints.sh <netid> <config_name> <exp_name> <cluster_id> [local_dir]}"
-CONFIG_NAME="${2:?Usage: pull_checkpoints.sh <netid> <config_name> <exp_name> <cluster_id> [local_dir]}"
-EXP_NAME="${3:?Usage: pull_checkpoints.sh <netid> <config_name> <exp_name> <cluster_id> [local_dir]}"
-CLUSTER_ID="${4:?Usage: pull_checkpoints.sh <netid> <config_name> <exp_name> <cluster_id> [local_dir]}"
-LOCAL_DIR="${5:-./checkpoints}"
+NETID="${1:?Usage: pull_checkpoints.sh <netid> <config_name> <exp_name> <cluster_id> [process_id] [local_dir]}"
+CONFIG_NAME="${2:?Usage: pull_checkpoints.sh <netid> <config_name> <exp_name> <cluster_id> [process_id] [local_dir]}"
+EXP_NAME="${3:?Usage: pull_checkpoints.sh <netid> <config_name> <exp_name> <cluster_id> [process_id] [local_dir]}"
+CLUSTER_ID="${4:?Usage: pull_checkpoints.sh <netid> <config_name> <exp_name> <cluster_id> [process_id] [local_dir]}"
+PROCESS_ID="${5:-0}"
+LOCAL_DIR="${6:-./checkpoints}"
 TRANSFER_HOST="transfer.chtc.wisc.edu"
 
-REMOTE_PATH="/staging/groups/hagenow_group/openpi/checkpoints_${CONFIG_NAME}_${EXP_NAME}_${CLUSTER_ID}_0"
+REMOTE_PATH="/staging/groups/hagenow_group/openpi/checkpoints_${CONFIG_NAME}_${EXP_NAME}_${CLUSTER_ID}_${PROCESS_ID}"
 
 echo "Downloading checkpoints from CHTC..."
 echo "  Remote: ${TRANSFER_HOST}:${REMOTE_PATH}"
