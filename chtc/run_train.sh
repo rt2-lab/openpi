@@ -34,9 +34,16 @@ fi
 # Dataset tarball is transferred by HTCondor into scratch.
 if [ -f collab_dataset.tar.gz ]; then
     export HF_LEROBOT_HOME="${_CONDOR_SCRATCH_DIR:-.}/lerobot_data"
-    mkdir -p "$HF_LEROBOT_HOME/local"
-    tar -xzf collab_dataset.tar.gz -C "$HF_LEROBOT_HOME/local"
+    mkdir -p "$HF_LEROBOT_HOME"
+    tar -xzf collab_dataset.tar.gz -C "$HF_LEROBOT_HOME"
     rm -f collab_dataset.tar.gz
+
+    EXPECTED_INFO="$HF_LEROBOT_HOME/local/collab/meta/info.json"
+    if [ ! -f "$EXPECTED_INFO" ]; then
+        echo "ERROR: Expected dataset metadata not found: $EXPECTED_INFO"
+        echo "Tarball extraction layout did not match expected LeRobot structure."
+        exit 3
+    fi
 fi
 
 echo "Computing normalization statistics..."
