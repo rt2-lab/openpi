@@ -83,12 +83,25 @@ condor_tail <id>  # stream stdout
 ### 5. Pull checkpoints and run inference locally
 
 ```bash
-./chtc/pull_checkpoints.sh <netid> <cluster_id>
+./chtc/pull_checkpoints.sh <netid> <config_name> <exp_name>
 
 uv run scripts/serve_policy.py policy:checkpoint \
-    --policy.config=pi05_collab \
-    --policy.dir=checkpoints/pi05_collab/my_run/30000
+    --policy.config=<config_name> \
+    --policy.dir=checkpoints/<config_name>/<exp_name>/<step>
 ```
+
+### Checkpoint persistence and resume behavior
+
+The training wrapper writes OpenPI checkpoints to the job scratch directory.
+
+The submit file uses:
+
+- `when_to_transfer_output = ON_EXIT_OR_EVICT`
+- `transfer_output_files = checkpoints`
+- `transfer_output_remaps` to `/staging/<netid>/openpi/...`
+
+So the checkpoint directory is transferred to `/staging` on normal completion and on eviction.
+The wrapper always starts training with `--overwrite`. Use a new `exp_name` for each submission.
 
 ## GPU Lab Limits
 
@@ -106,13 +119,15 @@ Key options on CHTC GPU Lab (as of 2025):
 
 | GPU | VRAM | Capability | Count |
 |-----|------|------------|-------|
-| A100-40GB | 40 GB | 8.0 | 8 |
-| A100-80GB | 80 GB | 8.0 | 32 |
 | L40/L40S | 45 GB | 8.9 | 46 |
 | H100 | 80 GB | 9.0 | 8 |
 | H200 | 141 GB | 9.0 | 16 |
 
-The submit file requests `gpus_minimum_capability = 8.0` and `gpus_minimum_memory = 40960` (40 GB), so jobs will land on A100-40GB or better.
+The submit file now targets H100/H200 specifically:
+
+- `gpus_minimum_capability = 9.0`
+- `gpus_minimum_memory = 80000`
+- `Requirements = ... && regexp("H100|H200", TARGET.GPUs_DeviceName)`
 
 ## Adjusting for LoRA vs Full Fine-Tuning
 

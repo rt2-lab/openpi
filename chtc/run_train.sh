@@ -1,73 +1,24 @@
 #!/bin/bash
-# ==============================================================================
-# CHTC training entrypoint for OpenPI
-# Called by HTCondor with:  run_train.sh <config_name> <exp_name>
-#
-# This script:
-#   1. Extracts the staged LeRobot dataset
-#   2. Computes normalization statistics (if not cached)
-#   3. Runs training
-#   4. Packages checkpoints for transfer back to /staging
-# ==============================================================================
-
 set -euo pipefail
 
-CONFIG_NAME="${1:?Usage: run_train.sh <config_name> <exp_name>}"
-EXP_NAME="${2:?Usage: run_train.sh <config_name> <exp_name>}"
+# Usage: run_train.sh <config_name> <exp_name> <netid>
+CONFIG_NAME="${1:?Usage: run_train.sh <config_name> <exp_name> <netid>}"
+EXP_NAME="${2:?Usage: run_train.sh <config_name> <exp_name> <netid>}"
+NETID="${3:?Usage: run_train.sh <config_name> <exp_name> <netid>}"
+
+PYTHON=/.venv/bin/python
 CKPT_DIR="checkpoints/${CONFIG_NAME}/${EXP_NAME}"
 
-# Absolute path to Python in the container's pre-built venv.
-# Using absolute paths so we never depend on PATH being set correctly
-# by Condor, the NVIDIA entrypoint, or the container ENV.
-PYTHON=/.venv/bin/python
+echo "OpenPI CHTC job: config=${CONFIG_NAME} exp=${EXP_NAME} netid=${NETID}"
+nvidia-smi || true
 
-# Ensure checkpoints_out.tar.gz always exists so Condor output transfer won't hold.
-package_on_exit() {
-    local rc=$?
-    echo "Packaging outputs (exit code: ${rc})..."
-
-    # Diagnostics: show where we are and what exists
-    echo "  cwd: $(pwd)"
-    echo "  CKPT_DIR: $CKPT_DIR"
-    echo "  _CONDOR_SCRATCH_DIR: ${_CONDOR_SCRATCH_DIR:-unset}"
-    ls -la checkpoints/"${CONFIG_NAME}" 2>/dev/null || echo "  checkpoints/${CONFIG_NAME}/ does not exist"
-    echo "  Disk usage:"
-    df -h . 2>/dev/null || true
-    du -sh checkpoints 2>/dev/null || echo "  no checkpoints/ dir"
-
-    if [ -d "$CKPT_DIR" ]; then
-        # Remove incomplete checkpoint temps (async writes that were interrupted)
-        find "$CKPT_DIR" -name '*.orbax-checkpoint-tmp-*' -exec rm -rf {} + 2>/dev/null || true
-        tar -czf checkpoints_out.tar.gz -C checkpoints "${CONFIG_NAME}/${EXP_NAME}"
-        echo "Checkpoints packaged: $(du -sh checkpoints_out.tar.gz | cut -f1)"
-    else
-        tar -czf checkpoints_out.tar.gz --files-from /dev/null
-        echo "WARNING: no checkpoint dir found at '$CKPT_DIR'; wrote empty archive"
-    fi
-}
-trap package_on_exit EXIT
-
-echo "============================================"
-echo "OpenPI CHTC Training Job"
-echo "  Config:     $CONFIG_NAME"
-echo "  Experiment: $EXP_NAME"
-echo "  Host:       $(hostname)"
-echo "  GPU:        ${CUDA_VISIBLE_DEVICES:-none}"
-echo "  Date:       $(date)"
-echo "============================================"
-
-# --- GPU diagnostics ---
-nvidia-smi || echo "WARNING: nvidia-smi not available"
-
-# --- Setup cache dirs on the scratch space ---
 export HF_HOME="${_CONDOR_SCRATCH_DIR:-.}/.cache/hf"
 export HF_DATASETS_CACHE="$HF_HOME/datasets"
 export OPENPI_DATA_HOME="${_CONDOR_SCRATCH_DIR:-.}/.cache/openpi"
 export XLA_PYTHON_CLIENT_MEM_FRACTION="${XLA_PYTHON_CLIENT_MEM_FRACTION:-0.9}"
 mkdir -p "$HF_HOME" "$HF_DATASETS_CACHE" "$OPENPI_DATA_HOME"
 
-# Seed scratch cache with assets pre-downloaded during Docker build
-# (e.g., PaliGemma tokenizer) so jobs don't need GCS access.
+# Seed tokenizer/assets cache from image.
 if [ -d /opt/openpi-cache ]; then
     cp -rn /opt/openpi-cache/* "$OPENPI_DATA_HOME/" 2>/dev/null || true
 fi
@@ -76,41 +27,22 @@ fi
 TOKENIZER_PATH="$OPENPI_DATA_HOME/big_vision/paligemma_tokenizer.model"
 if [ ! -f "$TOKENIZER_PATH" ]; then
     echo "ERROR: Missing tokenizer file: $TOKENIZER_PATH"
-    echo "       The container image likely does not include /opt/openpi-cache/big_vision/paligemma_tokenizer.model."
-    echo "       Rebuild and push the updated Docker image, then resubmit."
     exit 2
 fi
-echo "Tokenizer cache found: $TOKENIZER_PATH"
 
-# --- Extract the dataset ---
-# The submit file transfers collab_dataset.tar.gz into the working dir.
-# This tarball should contain the LeRobot dataset at the path that matches
-# your config's repo_id (e.g., local/collab/).
-DATASET_TAR="collab_dataset.tar.gz"
-if [ -f "$DATASET_TAR" ]; then
-    echo "Extracting dataset from $DATASET_TAR..."
+# Dataset tarball is transferred by HTCondor into scratch.
+if [ -f collab_dataset.tar.gz ]; then
     export HF_LEROBOT_HOME="${_CONDOR_SCRATCH_DIR:-.}/lerobot_data"
-    # Tarball contains "collab/..." but repo_id is "local/collab",
-    # so extract into the "local/" subdirectory.
     mkdir -p "$HF_LEROBOT_HOME/local"
-    tar -xzf "$DATASET_TAR" -C "$HF_LEROBOT_HOME/local"
-    echo "Dataset extracted to $HF_LEROBOT_HOME"
-    ls "$HF_LEROBOT_HOME/local/collab"
-    rm -f "$DATASET_TAR"
-else
-    echo "WARNING: $DATASET_TAR not found, assuming dataset is already available"
+    tar -xzf collab_dataset.tar.gz -C "$HF_LEROBOT_HOME/local"
+    rm -f collab_dataset.tar.gz
 fi
 
-# --- Compute normalization stats (idempotent, skips if already present) ---
 echo "Computing normalization statistics..."
 $PYTHON /app/scripts/compute_norm_stats.py --config-name "$CONFIG_NAME"
 
-# --- Run training ---
 echo "Starting training..."
+mkdir -p "$CKPT_DIR"
 $PYTHON /app/scripts/train.py "$CONFIG_NAME" \
     --exp-name="$EXP_NAME" \
     --overwrite
-
-echo "============================================"
-echo "Training complete at $(date)"
-echo "============================================"

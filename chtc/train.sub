@@ -33,12 +33,14 @@ executable              = chtc/run_train.sh
 # These can be overridden at submit time:
 #   condor_submit train.sub config_name=pi0_collab exp_name=my_exp
 config_name             = pi05_collab
-exp_name                = chtc_train
-arguments               = $(config_name) $(exp_name)
+# Default to unique run name per cluster so each submission writes to a new
+# staging directory (no collision with previous runs).
+exp_name                = chtc_train_$(Cluster)
+arguments               = $(config_name) $(exp_name) $(netid)
 
 # --- File transfer ---
 should_transfer_files   = YES
-when_to_transfer_output = ON_EXIT
+when_to_transfer_output = ON_EXIT_OR_EVICT
 
 # Secure W&B auth:
 # - Do NOT put WANDB_API_KEY in this file.
@@ -50,9 +52,10 @@ getenv                  = True
 # Also transfer any small config overrides from /home if needed.
 transfer_input_files    = file:///staging/$(netid)/collab_dataset.tar.gz
 
-# Output: checkpoints tarball written by run_train.sh → back to /staging
-transfer_output_files   = checkpoints_out.tar.gz
-transfer_output_remaps  = "checkpoints_out.tar.gz = file:///staging/$(netid)/checkpoints_$(Cluster).tar.gz"
+# Transfer checkpoints directly (no periodic tar step).
+# ON_EXIT_OR_EVICT will transfer this directory on normal exit and on eviction.
+transfer_output_files   = checkpoints
+transfer_output_remaps  = "checkpoints = file:///staging/$(netid)/openpi/checkpoints_$(config_name)_$(exp_name)_$(Cluster)_$(Process)"
 
 # --- Logging ---
 log                     = logs/train_$(Cluster).log
@@ -66,11 +69,15 @@ error                   = logs/train_$(Cluster).err
 request_gpus            = 1
 request_cpus            = 8
 request_memory          = 200GB
-request_disk            = 200GB
+#
+# You got evicted at ~221 GB DiskUsage with request_disk=200GB.
+# Give yourself headroom for: extracted dataset + JAX compilation cache + checkpoints.
+request_disk            = 1000GB 
 
-# Require A100-80GB or better (capability >= 8.0, VRAM >= 40 GB)
-gpus_minimum_capability = 8.0
-gpus_minimum_memory     = 72000
+# Target H100/H200 only (both are compute capability 9.0 on CHTC).
+gpus_minimum_capability = 9.0
+# H100 is 80GB; H200 is 141GB.
+gpus_minimum_memory     = 80000
 
 # --- GPU Lab policies ---
 +WantGPULab             = true
@@ -80,8 +87,8 @@ gpus_minimum_memory     = 72000
 # Enable checkpointing / backfill on research-group GPUs for extra capacity
 +is_resumable           = false 
 
-# Require /staging access
-Requirements            = (Target.HasCHTCStaging == true)
+# Require /staging access and H100/H200 device names explicitly.
+Requirements            = (Target.HasCHTCStaging == true) && (regexp("H100|H200", TARGET.GPUs_DeviceName))
 
 # --- Environment ---
 # Let JAX use 90% of GPU memory
