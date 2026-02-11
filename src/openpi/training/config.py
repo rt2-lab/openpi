@@ -1009,7 +1009,8 @@ _CONFIGS = [
             base_config=DataConfig(prompt_from_task=True),
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
-        num_train_steps=2_000,
+        num_train_steps=300,
+        save_interval=100
     ),
     TrainConfig(
         name="pi0_fast_collab",
@@ -1023,7 +1024,8 @@ _CONFIGS = [
             base_config=DataConfig(prompt_from_task=True),
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_fast_base/params"),
-        num_train_steps=2_000,
+        num_train_steps=300,
+        save_interval=100
     ),
     TrainConfig(
         name="pi05_collab",
@@ -1037,7 +1039,8 @@ _CONFIGS = [
             base_config=DataConfig(prompt_from_task=True),
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
-        num_train_steps=2_000,
+        num_train_steps=300,
+        save_interval=100
     ),
     #
     # Debugging configs.
