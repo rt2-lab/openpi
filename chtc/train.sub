@@ -52,10 +52,11 @@ getenv                  = True
 # Also transfer any small config overrides from /home if needed.
 transfer_input_files    = file:///staging/groups/hagenow_group/collab_dataset.tar.gz
 
-# Transfer checkpoints directly (no periodic tar step).
-# ON_EXIT_OR_EVICT will transfer this directory on normal exit and on eviction.
-transfer_output_files   = checkpoints
-transfer_output_remaps  = "checkpoints = file:///staging/groups/hagenow_group/openpi/checkpoints_$(config_name)_$(exp_name)_$(Cluster)_$(Process)"
+# Transfer one checkpoint bundle file.
+# run_train.sh creates checkpoint_bundle.tar at job exit (and on TERM).
+# This avoids directory URL remap edge-cases for large checkpoint trees.
+transfer_output_files   = checkpoint_bundle.tar
+transfer_output_remaps  = "checkpoint_bundle.tar = file:///staging/groups/hagenow_group/openpi/checkpoints_$(config_name)_$(exp_name)_$(Cluster).tar"
 
 # --- Logging ---
 log                     = logs/train_$(Cluster).log
@@ -75,7 +76,7 @@ request_memory          = 200GB
 request_disk            = 1000GB 
 
 # Target H100/H200 only (both are compute capability 9.0 on CHTC).
-gpus_minimum_capability = 9.0
+gpus_minimum_capability = 8.0
 # H100 is 80GB; H200 is 141GB.
 gpus_minimum_memory     = 80000
 
@@ -88,11 +89,11 @@ gpus_minimum_memory     = 80000
 +is_resumable           = false 
 
 # Require /staging access and H100/H200 device names explicitly.
-Requirements            = (Target.HasCHTCStaging == true) && (regexp("H100|H200", TARGET.GPUs_DeviceName))
+Requirements            = (Target.HasCHTCStaging == true) 
 
 # --- Environment ---
 # Let JAX use 90% of GPU memory
-environment             = "HOME=$_CONDOR_SCRATCH_DIR XDG_CACHE_HOME=$_CONDOR_SCRATCH_DIR/.cache UV_CACHE_DIR=$_CONDOR_SCRATCH_DIR/.cache/uv XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 HF_HOME=$_CONDOR_SCRATCH_DIR/.cache/hf OPENPI_DATA_HOME=$_CONDOR_SCRATCH_DIR/.cache/openpi WANDB_DIR=$_CONDOR_SCRATCH_DIR/.cache/wandb"
+environment             = "HOME=$$(CondorScratchDir) XDG_CACHE_HOME=$$(CondorScratchDir)/.cache UV_CACHE_DIR=$$(CondorScratchDir)/.cache/uv XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 HF_HOME=$$(CondorScratchDir)/.cache/hf OPENPI_DATA_HOME=$$(CondorScratchDir)/.cache/openpi WANDB_DIR=$$(CondorScratchDir)/.cache/wandb"
 
 # Stream logs in real time for monitoring
 stream_output           = True

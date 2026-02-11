@@ -8,6 +8,7 @@ NETID="${3:?Usage: run_train.sh <config_name> <exp_name> <netid>}"
 
 PYTHON=/.venv/bin/python
 CKPT_DIR="checkpoints/${CONFIG_NAME}/${EXP_NAME}"
+BUNDLE_NAME="checkpoint_bundle.tar"
 
 echo "OpenPI CHTC job: config=${CONFIG_NAME} exp=${EXP_NAME} netid=${NETID}"
 nvidia-smi || true
@@ -40,6 +41,22 @@ fi
 
 echo "Computing normalization statistics..."
 $PYTHON /app/scripts/compute_norm_stats.py --config-name "$CONFIG_NAME"
+
+# Package checkpoints once at end (or during graceful eviction) so HTCondor
+# transfers a single known file to /staging.
+package_checkpoints() {
+    if [ -f "$BUNDLE_NAME" ]; then
+        return 0
+    fi
+    if [ ! -d "$CKPT_DIR" ]; then
+        echo "No checkpoint directory found at $CKPT_DIR; skipping bundle."
+        return 0
+    fi
+    echo "Packaging checkpoints into $BUNDLE_NAME ..."
+    tar -cf "$BUNDLE_NAME" -C "checkpoints/${CONFIG_NAME}" "${EXP_NAME}"
+}
+
+trap 'package_checkpoints' EXIT TERM INT
 
 echo "Starting training..."
 mkdir -p "$CKPT_DIR"

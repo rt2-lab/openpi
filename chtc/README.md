@@ -86,7 +86,7 @@ condor_tail <id>  # stream stdout
 ### 5. Pull checkpoints and run inference locally
 
 ```bash
-./chtc/pull_checkpoints.sh <netid> <config_name> <exp_name> <cluster_id> [process_id]
+./chtc/pull_checkpoints.sh <netid> <config_name> <exp_name> <cluster_id>
 
 uv run scripts/serve_policy.py policy:checkpoint \
     --policy.config=<config_name> \
@@ -96,14 +96,15 @@ uv run scripts/serve_policy.py policy:checkpoint \
 ### Checkpoint persistence and resume behavior
 
 The training wrapper writes OpenPI checkpoints to the job scratch directory.
+At job end (and TERM), it packages them into `checkpoint_bundle.tar`.
 
 The submit file uses:
 
 - `when_to_transfer_output = ON_EXIT_OR_EVICT`
-- `transfer_output_files = checkpoints`
+- `transfer_output_files = checkpoint_bundle.tar`
 - `transfer_output_remaps` to `/staging/groups/hagenow_group/openpi/...`
 
-So the checkpoint directory is transferred to `/staging` on normal completion and on eviction.
+So one checkpoint tarball is transferred to `/staging` on normal completion and on eviction.
 The wrapper always starts training with `--overwrite`. Use a new `exp_name` for each submission.
 
 ## GPU Lab Limits
