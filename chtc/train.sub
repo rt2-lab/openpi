@@ -53,7 +53,7 @@ getenv                  = True
 transfer_input_files    = file:///staging/groups/hagenow_group/collab_dataset.tar.gz
 
 # Transfer one checkpoint bundle file.
-# run_train.sh creates checkpoint_bundle.tar at job exit (and on TERM).
+# run_train.sh creates checkpoint_bundle.tar after training and on TERM/EXIT.
 # This avoids directory URL remap edge-cases for large checkpoint trees.
 transfer_output_files   = checkpoint_bundle.tar
 transfer_output_remaps  = "checkpoint_bundle.tar = file:///staging/groups/hagenow_group/openpi/checkpoints_$(config_name)_$(exp_name)_$(Cluster).tar"

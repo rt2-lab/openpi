@@ -42,8 +42,7 @@ fi
 echo "Computing normalization statistics..."
 $PYTHON /app/scripts/compute_norm_stats.py --config-name "$CONFIG_NAME"
 
-# Package checkpoints once at end (or during graceful eviction) so HTCondor
-# transfers a single known file to /staging.
+# Package checkpoints into one file for transfer to /staging.
 package_checkpoints() {
     if [ -f "$BUNDLE_NAME" ]; then
         return 0
@@ -56,10 +55,24 @@ package_checkpoints() {
     tar -cf "$BUNDLE_NAME" -C "checkpoints/${CONFIG_NAME}" "${EXP_NAME}"
 }
 
-trap 'package_checkpoints' EXIT TERM INT
+# By default, package on EXIT/TERM/INT (eviction/interruption path).
+# On successful completion we package explicitly and disable this trap
+# to avoid any duplicate packaging step.
+NORMAL_COMPLETION=0
+on_exit_or_signal() {
+    if [ "$NORMAL_COMPLETION" -eq 1 ]; then
+        return 0
+    fi
+    package_checkpoints
+}
+trap 'on_exit_or_signal' EXIT TERM INT
 
 echo "Starting training..."
 mkdir -p "$CKPT_DIR"
 $PYTHON /app/scripts/train.py "$CONFIG_NAME" \
     --exp-name="$EXP_NAME" \
     --overwrite
+
+package_checkpoints
+NORMAL_COMPLETION=1
+trap - EXIT TERM INT

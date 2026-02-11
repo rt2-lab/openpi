@@ -96,7 +96,10 @@ uv run scripts/serve_policy.py policy:checkpoint \
 ### Checkpoint persistence and resume behavior
 
 The training wrapper writes OpenPI checkpoints to the job scratch directory.
-At job end (and TERM), it packages them into `checkpoint_bundle.tar`.
+It packages them into `checkpoint_bundle.tar` both after training completes
+and on termination signals (best-effort for eviction/preemption).
+On successful completion, packaging runs once and the signal trap is disabled,
+so it does not package again during normal exit.
 
 The submit file uses:
 
