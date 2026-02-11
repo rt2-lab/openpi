@@ -3,7 +3,7 @@
 # ==============================================================================
 #
 # Usage:
-#   1. Stage your LeRobot dataset to /staging/<netid>/collab_dataset.tar.gz
+#   1. Stage your LeRobot dataset to /staging/groups/hagenow_group/collab_dataset.tar.gz
 #   2. Push your Docker image:  docker push <user>/openpi_train:latest
 #   3. Submit:  condor_submit chtc/train.sub
 #
@@ -22,7 +22,7 @@
 universe                = container
 container_image         = docker://lexu27/openpi_train:test
 
-# Your CHTC NetID (used for /staging paths). Override at submit-time if desired:
+# Your CHTC NetID (used for login/auth only). Override at submit-time if desired:
 #   condor_submit chtc/train.sub netid=lpxu
 netid                   = lpxu
 
@@ -35,7 +35,7 @@ executable              = chtc/run_train.sh
 config_name             = pi05_collab
 # Default to unique run name per cluster so each submission writes to a new
 # staging directory (no collision with previous runs).
-exp_name                = chtc_train_$(Cluster)
+exp_name                = pi05_$(Cluster)
 arguments               = $(config_name) $(exp_name) $(netid)
 
 # --- File transfer ---
@@ -47,15 +47,15 @@ when_to_transfer_output = ON_EXIT_OR_EVICT
 # - Instead, export it in your submit shell (or ~/.bashrc) and let HTCondor pass it through.
 getenv                  = True
 
-# Input: LeRobot dataset from /staging (adjust path for your netid)
+# Input: LeRobot dataset from shared group staging.
 # The dataset tarball will be extracted inside the job by run_train.sh.
 # Also transfer any small config overrides from /home if needed.
-transfer_input_files    = file:///staging/$(netid)/collab_dataset.tar.gz
+transfer_input_files    = file:///staging/groups/hagenow_group/collab_dataset.tar.gz
 
 # Transfer checkpoints directly (no periodic tar step).
 # ON_EXIT_OR_EVICT will transfer this directory on normal exit and on eviction.
 transfer_output_files   = checkpoints
-transfer_output_remaps  = "checkpoints = file:///staging/$(netid)/openpi/checkpoints_$(config_name)_$(exp_name)_$(Cluster)_$(Process)"
+transfer_output_remaps  = "checkpoints = file:///staging/groups/hagenow_group/openpi/checkpoints_$(config_name)_$(exp_name)_$(Cluster)_$(Process)"
 
 # --- Logging ---
 log                     = logs/train_$(Cluster).log

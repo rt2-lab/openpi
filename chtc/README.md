@@ -40,11 +40,14 @@ docker tag openpi_train <dockerhub_user>/openpi_train:latest
 docker push <dockerhub_user>/openpi_train:latest
 ```
 
-### 3. Stage data to CHTC
+### 3. Stage data to CHTC group staging
 
 ```bash
 ./chtc/stage_data.sh <netid>
 ```
+
+This uploads to:
+`/staging/groups/hagenow_group/collab_dataset.tar.gz`
 
 ### 4. Submit the training job
 
@@ -83,7 +86,7 @@ condor_tail <id>  # stream stdout
 ### 5. Pull checkpoints and run inference locally
 
 ```bash
-./chtc/pull_checkpoints.sh <netid> <config_name> <exp_name>
+./chtc/pull_checkpoints.sh <netid> <config_name> <exp_name> <cluster_id>
 
 uv run scripts/serve_policy.py policy:checkpoint \
     --policy.config=<config_name> \
@@ -98,7 +101,7 @@ The submit file uses:
 
 - `when_to_transfer_output = ON_EXIT_OR_EVICT`
 - `transfer_output_files = checkpoints`
-- `transfer_output_remaps` to `/staging/<netid>/openpi/...`
+- `transfer_output_remaps` to `/staging/groups/hagenow_group/openpi/...`
 
 So the checkpoint directory is transferred to `/staging` on normal completion and on eviction.
 The wrapper always starts training with `--overwrite`. Use a new `exp_name` for each submission.
