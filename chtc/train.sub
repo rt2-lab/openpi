@@ -20,7 +20,7 @@
 # CHTC uses "universe = container" with nvidia-docker support.
 # Replace <dockerhub_user> with your DockerHub username.
 universe                = container
-container_image         = docker://lexu27/openpi_train:test3
+container_image         = docker://lexu27/openpi_train:final
 
 # Your CHTC NetID (used for login/auth only). Override at submit-time if desired:
 #   condor_submit chtc/train.sub netid=lpxu
@@ -76,7 +76,7 @@ request_memory          = 200GB
 request_disk            = 1000GB 
 
 # Target H100/H200 only (both are compute capability 9.0 on CHTC).
-gpus_minimum_capability = 8.0
+gpus_minimum_capability = 9.0
 # H100 is 80GB; H200 is 141GB.
 gpus_minimum_memory     = 80000
 
