@@ -35,7 +35,7 @@ getenv                  = True
 transfer_input_files    = file:///staging/groups/hagenow_group/collab_dataset.tar.gz
 
 transfer_output_files   = checkpoint_bundle.tar
-transfer_output_remaps  = "checkpoint_bundle.tar = file:///staging/groups/hagenow_group/openpi/checkpoints_lora_$(config_name)_$(exp_name)_$(Cluster).tar"
+transfer_output_remaps  = "checkpoint_bundle.tar = file:///staging/groups/hagenow_group/openpi/$(exp_name).tar"
 
 # --- Logging ---
 log                     = logs/train_lora_$(Cluster).log
