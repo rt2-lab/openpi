@@ -18,6 +18,7 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git git-lfs linux-headers-generic build-essential clang curl \
+    ca-certificates \
     libgl1-mesa-glx libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 

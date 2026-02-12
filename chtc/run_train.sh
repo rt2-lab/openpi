@@ -17,6 +17,8 @@ export HF_HOME="${_CONDOR_SCRATCH_DIR:-.}/.cache/hf"
 export HF_DATASETS_CACHE="$HF_HOME/datasets"
 export OPENPI_DATA_HOME="${_CONDOR_SCRATCH_DIR:-.}/.cache/openpi"
 export XLA_PYTHON_CLIENT_MEM_FRACTION="${XLA_PYTHON_CLIENT_MEM_FRACTION:-0.9}"
+# Fix missing CA certs in container — use certifi's bundle for both Go (wandb core) and Python SSL.
+export SSL_CERT_FILE=$($PYTHON -c "import certifi; print(certifi.where())")
 mkdir -p "$HF_HOME" "$HF_DATASETS_CACHE" "$OPENPI_DATA_HOME"
 
 # Seed tokenizer/assets cache from image.
