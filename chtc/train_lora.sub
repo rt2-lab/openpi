@@ -1,0 +1,70 @@
+# ==============================================================================
+# HTCondor submit file for OpenPI LoRA fine-tuning on CHTC GPU Lab
+# ==============================================================================
+#
+# LoRA fine-tuning fits in ~24 GB VRAM, so we can target L40/L40S GPUs
+# (much more available than H100/H200) and use "short" job length for
+# better scheduling priority.
+#
+# Usage:
+#   condor_submit chtc/train_lora.sub
+#   condor_submit chtc/train_lora.sub config_name=pi0_collab_lora exp_name=run1
+#
+# ==============================================================================
+
+# --- Container setup ---
+universe                = container
+container_image         = docker://lexu27/openpi_train:test2
+
+netid                   = lpxu
+
+# --- Executable (same script, different config) ---
+executable              = chtc/run_train.sh
+
+# --- Arguments ---
+config_name             = pi05_collab_lora
+exp_name                = pi05_lora_$(Cluster)
+arguments               = $(config_name) $(exp_name) $(netid)
+
+# --- File transfer ---
+should_transfer_files   = YES
+when_to_transfer_output = ON_EXIT_OR_EVICT
+
+getenv                  = True
+
+transfer_input_files    = file:///staging/groups/hagenow_group/collab_dataset.tar.gz
+
+transfer_output_files   = checkpoint_bundle.tar
+transfer_output_remaps  = "checkpoint_bundle.tar = file:///staging/groups/hagenow_group/openpi/checkpoints_lora_$(config_name)_$(exp_name)_$(Cluster).tar"
+
+# --- Logging ---
+log                     = logs/train_lora_$(Cluster).log
+output                  = logs/train_lora_$(Cluster).out
+error                   = logs/train_lora_$(Cluster).err
+
+# --- Resource requests (LoRA-sized) ---
+request_gpus            = 1
+request_cpus            = 8
+request_memory          = 100GB
+request_disk            = 500GB
+
+# L40/L40S (cap 8.9, 45 GB) are plentiful and more than enough for LoRA.
+gpus_minimum_capability = 8.0
+gpus_minimum_memory     = 24576
+
+# --- GPU Lab policies ---
++WantGPULab             = true
+# LoRA trains fast — "short" (12h max) gets higher scheduling priority.
++GPUJobLength           = "short"
+
++is_resumable           = false
+
+Requirements            = (Target.HasCHTCStaging == true)
+
+# --- Environment ---
+environment             = "HOME=$_CONDOR_SCRATCH_DIR XDG_CACHE_HOME=$_CONDOR_SCRATCH_DIR/.cache UV_CACHE_DIR=$_CONDOR_SCRATCH_DIR/.cache/uv XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 HF_HOME=$_CONDOR_SCRATCH_DIR/.cache/hf OPENPI_DATA_HOME=$_CONDOR_SCRATCH_DIR/.cache/openpi WANDB_DIR=$_CONDOR_SCRATCH_DIR/.cache/wandb"
+
+stream_output           = True
+stream_error            = True
+
+queue 1

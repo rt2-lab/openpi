@@ -1043,6 +1043,88 @@ _CONFIGS = [
         save_interval=100
     ),
     #
+    # Collab (xArm) LoRA fine-tuning configs.
+    #
+    TrainConfig(
+        name="pi0_collab_lora",
+        project_name="Collaborative Policy",
+        wandb_entity="RT2-DIFFUSE",
+        wandb_group="OpenPI (Collab LoRA)",
+        wandb_tags=("openpi", "collab", "pi0", "lora"),
+        model=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+            action_dim=32,
+            action_horizon=16,
+        ),
+        data=LeRobotCollabDataConfig(
+            repo_id="local/collab",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+        freeze_filter=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        ema_decay=None,
+        num_train_steps=300,
+        save_interval=100,
+    ),
+    TrainConfig(
+        name="pi0_fast_collab_lora",
+        project_name="Collaborative Policy",
+        wandb_entity="RT2-DIFFUSE",
+        wandb_group="OpenPI (Collab LoRA)",
+        wandb_tags=("openpi", "collab", "pi0_fast", "lora"),
+        model=pi0_fast.Pi0FASTConfig(
+            paligemma_variant="gemma_2b_lora",
+            action_dim=32,
+            action_horizon=16,
+            max_token_len=180,
+        ),
+        data=LeRobotCollabDataConfig(
+            repo_id="local/collab",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_fast_base/params"),
+        freeze_filter=pi0_fast.Pi0FASTConfig(
+            paligemma_variant="gemma_2b_lora",
+            action_dim=32,
+            action_horizon=16,
+            max_token_len=180,
+        ).get_freeze_filter(),
+        ema_decay=None,
+        num_train_steps=300,
+        save_interval=100,
+    ),
+    TrainConfig(
+        name="pi05_collab_lora",
+        project_name="Collaborative Policy",
+        wandb_entity="RT2-DIFFUSE",
+        wandb_group="OpenPI (Collab LoRA)",
+        wandb_tags=("openpi", "collab", "pi05", "lora"),
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+            action_dim=32,
+            action_horizon=16,
+        ),
+        data=LeRobotCollabDataConfig(
+            repo_id="local/collab",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        ema_decay=None,
+        num_train_steps=300,
+        save_interval=100,
+    ),
+    #
     # Debugging configs.
     #
     TrainConfig(
