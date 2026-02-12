@@ -14,7 +14,7 @@
 
 # --- Container setup ---
 universe                = container
-container_image         = docker://lexu27/openpi_train:test2
+container_image         = docker://lexu27/openpi_train:lora
 
 netid                   = lpxu
 
