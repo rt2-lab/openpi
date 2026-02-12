@@ -1,14 +1,17 @@
 # Minimal container test submit file for CHTC.
 universe                = container
-container_image         = docker://lexu27/openpi_train:latest
+container_image         = docker://lexu27/openpi_train:test3
 
-# Run a tiny script via bash (avoids executable-bit pitfalls).
+# Run SSL connectivity sanity check.
 executable              = /bin/bash
-arguments               = test.sh
+arguments               = chtc/test_ssl.sh
+
+# Pass through env vars (WANDB_API_KEY, etc.) from submit shell.
+getenv                  = True
 
 should_transfer_files   = YES
 when_to_transfer_output = ON_EXIT
-transfer_input_files    = chtc/test.sh
+transfer_input_files    = chtc/test_ssl.sh
 
 log                     = logs/docker_test_$(Cluster).log
 output                  = logs/docker_test_$(Cluster).out

@@ -16,7 +16,7 @@ Train pi0/pi0.5 models on [CHTC GPU Lab](https://chtc.cs.wisc.edu/uw-research-co
 │  LOCAL MACHINE   │     │      CHTC        │     │  LOCAL MACHINE  │
 │                  │     │                  │     │                 │
 │ 1. Convert data  │────>│ 3. Train on GPU  │────>│ 5. Serve policy │
-│ 2. Stage to CHTC │     │    (H100/H200)   │     │    (local GPU)  │
+│ 2. Stage to CHTC │     │    (A100/H100)   │     │    (local GPU)  │
 │                  │     │ 4. Save ckpts    │     │ 6. Run robot    │
 └─────────────────┘     └──────────────────┘     └─────────────────┘
 ```
@@ -127,14 +127,9 @@ Key options on CHTC GPU Lab (as of 2025):
 | GPU | VRAM | Capability | Count |
 |-----|------|------------|-------|
 | L40/L40S | 45 GB | 8.9 | 46 |
+| A100 | 80 GB | 8.0 | 8 |
 | H100 | 80 GB | 9.0 | 8 |
 | H200 | 141 GB | 9.0 | 16 |
-
-The submit file now targets H100/H200 specifically:
-
-- `gpus_minimum_capability = 9.0`
-- `gpus_minimum_memory = 80000`
-- `Requirements = ... && regexp("H100|H200", TARGET.GPUs_DeviceName)`
 
 ## Adjusting for LoRA vs Full Fine-Tuning
 

@@ -88,7 +88,7 @@ gpus_minimum_memory     = 80000
 # Enable checkpointing / backfill on research-group GPUs for extra capacity
 +is_resumable           = false 
 
-# Require /staging access and H100/H200 device names explicitly.
+# Require /staging access
 Requirements            = (Target.HasCHTCStaging == true) 
 
 # --- Environment ---
