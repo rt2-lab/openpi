@@ -3,6 +3,7 @@ import enum
 import logging
 import socket
 
+import numpy as np
 import tyro
 
 from openpi.policies import policy as _policy
@@ -45,6 +46,8 @@ class Args:
     # If provided, will be used in case the "prompt" key is not present in the data, or if the model doesn't have a default
     # prompt.
     default_prompt: str | None = None
+    # Path to a text file whose contents will always be used as the prompt, overriding any other source.
+    prompt_file: str | None = None
 
     # Port to serve the policy on.
     port: int = 8000
@@ -96,9 +99,31 @@ def create_policy(args: Args) -> _policy.Policy:
             return create_default_policy(args.env, default_prompt=args.default_prompt)
 
 
+class PromptOverridePolicy(_policy.BasePolicy):
+    """Wraps a policy to always override the prompt."""
+
+    def __init__(self, policy: _policy.BasePolicy, prompt: str):
+        self._policy = policy
+        self._prompt = np.asarray(prompt)
+
+    def infer(self, obs: dict) -> dict:
+        obs["prompt"] = self._prompt
+        return self._policy.infer(obs)
+
+    @property
+    def metadata(self) -> dict:
+        return self._policy.metadata
+
+
 def main(args: Args) -> None:
     policy = create_policy(args)
     policy_metadata = policy.metadata
+
+    if args.prompt_file is not None:
+        with open(args.prompt_file) as f:
+            prompt = f.read().strip()
+        logging.info("Overriding prompt with: %s", prompt)
+        policy = PromptOverridePolicy(policy, prompt)
 
     # Record the policy's behavior.
     if args.record:
