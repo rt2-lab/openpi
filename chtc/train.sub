@@ -20,7 +20,7 @@
 # CHTC uses "universe = container" with nvidia-docker support.
 # Replace <dockerhub_user> with your DockerHub username.
 universe                = container
-container_image         = docker://lexu27/openpi_train:final
+container_image         = docker://lexu27/openpi_train:prompting
 
 # Your CHTC NetID (used for login/auth only). Override at submit-time if desired:
 #   condor_submit chtc/train.sub netid=lpxu
