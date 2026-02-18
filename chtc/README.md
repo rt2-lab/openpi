@@ -36,8 +36,8 @@ uv run examples/collab/convert_collab_data_to_lerobot.py \
 
 ```bash
 docker build -t openpi_train -f chtc/train.Dockerfile .
-docker tag openpi_train lexu27/openpi_train:test_final
-docker push lexu27/openpi_train:test_final
+docker tag openpi_train lexu27/openpi_train:prompting2
+docker push lexu27/openpi_train:prompting2
 ```
 
 ### 3. Stage data to CHTC group staging

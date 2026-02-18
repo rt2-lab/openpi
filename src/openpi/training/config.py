@@ -1010,7 +1010,8 @@ _CONFIGS = [
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
         num_train_steps=5000,
-        save_interval=500
+        save_interval=500,
+        keep_period=500
     ),
     TrainConfig(
         name="pi0_fast_collab",
@@ -1024,8 +1025,9 @@ _CONFIGS = [
             base_config=DataConfig(prompt_from_task=True),
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_fast_base/params"),
-        num_train_steps=5000,
-        save_interval=500
+        num_train_steps=4500,
+        save_interval=500,
+        keep_period=500,
     ),
     TrainConfig(
         name="pi05_collab",
@@ -1040,7 +1042,8 @@ _CONFIGS = [
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         num_train_steps=5000,
-        save_interval=500
+        save_interval=500,
+        keep_period=500
     ),
     #
     # Collab (xArm) LoRA fine-tuning configs.
@@ -1069,6 +1072,7 @@ _CONFIGS = [
         ema_decay=None,
         num_train_steps=25000,
         save_interval=1000,
+        keep_period=500
     ),
     TrainConfig(
         name="pi0_fast_collab_lora",
@@ -1096,6 +1100,7 @@ _CONFIGS = [
         ema_decay=None,
         num_train_steps=25000,
         save_interval=1000,
+        keep_period=500
     ),
     TrainConfig(
         name="pi05_collab_lora",
@@ -1123,6 +1128,7 @@ _CONFIGS = [
         ema_decay=None,
         num_train_steps=25000,
         save_interval=1000,
+        keep_period=500
     ),
     #
     # Debugging configs.
