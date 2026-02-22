@@ -33,20 +33,18 @@ if [ ! -f "$TOKENIZER_PATH" ]; then
     exit 2
 fi
 
-# Dataset tarball is transferred by HTCondor into scratch.
-if [ -f collab_dataset.tar.gz ]; then
-    export HF_LEROBOT_HOME="${_CONDOR_SCRATCH_DIR:-.}/lerobot_data"
-    mkdir -p "$HF_LEROBOT_HOME"
-    tar -xzf collab_dataset.tar.gz -C "$HF_LEROBOT_HOME"
-    rm -f collab_dataset.tar.gz
-
-    EXPECTED_INFO="$HF_LEROBOT_HOME/local/collab/meta/info.json"
-    if [ ! -f "$EXPECTED_INFO" ]; then
-        echo "ERROR: Expected dataset metadata not found: $EXPECTED_INFO"
-        echo "Tarball extraction layout did not match expected LeRobot structure."
-        exit 3
-    fi
-fi
+# Dataset tarballs are transferred by HTCondor into scratch.
+# Extract every *_dataset.tar.gz — each tarball should unpack to local/<name>/...
+export HF_LEROBOT_HOME="${_CONDOR_SCRATCH_DIR:-.}/lerobot_data"
+mkdir -p "$HF_LEROBOT_HOME"
+for tarball in *_dataset.tar.gz; do
+    [ -f "$tarball" ] || continue
+    echo "Extracting dataset tarball: $tarball"
+    tar -xzf "$tarball" -C "$HF_LEROBOT_HOME"
+    rm -f "$tarball"
+done
+echo "Datasets available under $HF_LEROBOT_HOME:"
+ls "$HF_LEROBOT_HOME/local/" 2>/dev/null || echo "(none)"
 
 echo "Computing normalization statistics..."
 $PYTHON /app/scripts/compute_norm_stats.py --config-name "$CONFIG_NAME"
