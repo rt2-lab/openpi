@@ -574,7 +574,7 @@ class TrainConfig:
     # How often (in steps) to save checkpoints.
     save_interval: int = 1000
     # If set, any existing checkpoints matching step % keep_period == 0 will not be deleted.
-    keep_period: int | None = 500
+    keep_period: int | None = 5000 
 
     # If true, will overwrite the checkpoint directory if it already exists.
     overwrite: bool = False
@@ -1010,8 +1010,7 @@ _CONFIGS = [
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
         num_train_steps=5000,
-        save_interval=500,
-        keep_period=500
+        save_interval=5000,
     ),
     TrainConfig(
         name="pi0_fast_collab",
@@ -1026,8 +1025,7 @@ _CONFIGS = [
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_fast_base/params"),
         num_train_steps=4500,
-        save_interval=500,
-        keep_period=500,
+        save_interval=5000,
     ),
     TrainConfig(
         name="pi05_collab",
@@ -1042,8 +1040,56 @@ _CONFIGS = [
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         num_train_steps=5000,
-        save_interval=500,
-        keep_period=500
+        save_interval=5000,
+    ),
+    #
+    # Handover derisk fine-tuning configs.
+    # Same robot/format as collab — reuses LeRobotCollabDataConfig with a different repo_id.
+    #
+    TrainConfig(
+        name="pi0_handover_derisk",
+        project_name="Handover Derisk",
+        wandb_entity="RT2-DIFFUSE",
+        wandb_group="OpenPI (Handover Derisk)",
+        wandb_tags=("openpi", "handover_derisk", "pi0"),
+        model=pi0_config.Pi0Config(action_dim=32, action_horizon=16),
+        data=LeRobotCollabDataConfig(
+            repo_id="local/handover_derisk",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=25000,
+        save_interval=5000,
+    ),
+    TrainConfig(
+        name="pi0_fast_handover_derisk",
+        project_name="Handover Derisk",
+        wandb_entity="RT2-DIFFUSE",
+        wandb_group="OpenPI (Handover Derisk)",
+        wandb_tags=("openpi", "handover_derisk", "pi0_fast"),
+        model=pi0_fast.Pi0FASTConfig(action_dim=32, action_horizon=16, max_token_len=180),
+        data=LeRobotCollabDataConfig(
+            repo_id="local/handover_derisk",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_fast_base/params"),
+        num_train_steps=25000,
+        save_interval=5000,
+    ),
+    TrainConfig(
+        name="pi05_handover_derisk",
+        project_name="Handover Derisk",
+        wandb_entity="RT2-DIFFUSE",
+        wandb_group="OpenPI (Handover Derisk)",
+        wandb_tags=("openpi", "handover_derisk", "pi05"),
+        model=pi0_config.Pi0Config(pi05=True, action_dim=32, action_horizon=16),
+        data=LeRobotCollabDataConfig(
+            repo_id="local/handover_derisk",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=25000,
+        save_interval=5000,
     ),
     #
     # Collab (xArm) LoRA fine-tuning configs.
@@ -1071,8 +1117,7 @@ _CONFIGS = [
         ).get_freeze_filter(),
         ema_decay=None,
         num_train_steps=25000,
-        save_interval=1000,
-        keep_period=500
+        save_interval=5000,
     ),
     TrainConfig(
         name="pi0_fast_collab_lora",
@@ -1099,8 +1144,7 @@ _CONFIGS = [
         ).get_freeze_filter(),
         ema_decay=None,
         num_train_steps=25000,
-        save_interval=1000,
-        keep_period=500
+        save_interval=5000,
     ),
     TrainConfig(
         name="pi05_collab_lora",
@@ -1127,8 +1171,7 @@ _CONFIGS = [
         ).get_freeze_filter(),
         ema_decay=None,
         num_train_steps=25000,
-        save_interval=1000,
-        keep_period=500
+        save_interval=5000,
     ),
     #
     # Debugging configs.
