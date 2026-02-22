@@ -32,7 +32,7 @@ executable              = chtc/run_train.sh
 # --- Arguments ---
 # These can be overridden at submit time:
 #   condor_submit train.sub config_name=pi0_collab exp_name=my_exp
-config_name             = pi05_handover_derisk
+config_name             = pi05_all_handover_derisk
 # Default to unique run name per cluster so each submission writes to a new
 # staging directory (no collision with previous runs).
 exp_name                = pi05_$(Cluster)
