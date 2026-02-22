@@ -1091,6 +1091,55 @@ _CONFIGS = [
         num_train_steps=25000,
         save_interval=5000,
     ),
+
+    # Handover derisk fine-tuning configs.
+    # Same robot/format as collab — reuses LeRobotCollabDataConfig with a different repo_id.
+    #
+    TrainConfig(
+        name="pi0_all_handover_derisk",
+        project_name="All Handover Derisk",
+        wandb_entity="RT2-DIFFUSE",
+        wandb_group="OpenPI (All Handover Derisk)",
+        wandb_tags=("openpi", "all_handover_derisk", "pi0"),
+        model=pi0_config.Pi0Config(action_dim=32, action_horizon=16),
+        data=LeRobotCollabDataConfig(
+            repo_id="local/all_handover_derisk",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=25000,
+        save_interval=5000,
+    ),
+    TrainConfig(
+        name="pi0_fast_all_handover_derisk",
+        project_name="All Handover Derisk",
+        wandb_entity="RT2-DIFFUSE",
+        wandb_group="OpenPI (All Handover Derisk)",
+        wandb_tags=("openpi", "all_handover_derisk", "pi0_fast"),
+        model=pi0_fast.Pi0FASTConfig(action_dim=32, action_horizon=16, max_token_len=180),
+        data=LeRobotCollabDataConfig(
+            repo_id="local/all_handover_derisk",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_fast_base/params"),
+        num_train_steps=25000,
+        save_interval=5000,
+    ),
+    TrainConfig(
+        name="pi05_all_handover_derisk",
+        project_name="All Handover Derisk",
+        wandb_entity="RT2-DIFFUSE",
+        wandb_group="OpenPI (All Handover Derisk)",
+        wandb_tags=("openpi", "all_handover_derisk", "pi05"),
+        model=pi0_config.Pi0Config(pi05=True, action_dim=32, action_horizon=16),
+        data=LeRobotCollabDataConfig(
+            repo_id="local/all_handover_derisk",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=25000,
+        save_interval=5000,
+    ),
     #
     # Collab (xArm) LoRA fine-tuning configs.
     #

@@ -36,14 +36,14 @@ uv run examples/collab/convert_collab_data_to_lerobot.py \
 
 ```bash
 docker build -t openpi_train -f chtc/train.Dockerfile .
-docker tag openpi_train lexu27/openpi_train:handover_derisk
-docker push lexu27/openpi_train:handover_derisk
+docker tag openpi_train lexu27/openpi_train:all_handover_derisk
+docker push lexu27/openpi_train:all_handover_derisk
 ```
 
 ### 3. Stage data to CHTC group staging
 
 ```bash
-./chtc/stage_data.sh <netid>
+./chtc/stage_data.sh <netid> <dataset_name>
 ```
 
 This uploads to:

@@ -20,7 +20,7 @@
 # CHTC uses "universe = container" with nvidia-docker support.
 # Replace <dockerhub_user> with your DockerHub username.
 universe                = container
-container_image         = docker://lexu27/openpi_train:handover_derisk
+container_image         = docker://lexu27/openpi_train:all_handover_derisk
 
 # Your CHTC NetID (used for login/auth only). Override at submit-time if desired:
 #   condor_submit chtc/train.sub netid=lpxu
@@ -50,7 +50,7 @@ getenv                  = True
 # Input: LeRobot dataset from shared group staging.
 # The dataset tarball will be extracted inside the job by run_train.sh.
 # Also transfer any small config overrides from /home if needed.
-transfer_input_files    = file:///staging/groups/hagenow_group/handover_derisk_dataset.tar.gz
+transfer_input_files    = file:///staging/groups/hagenow_group/all_handover_derisk_dataset.tar.gz
 
 # Transfer one checkpoint bundle file.
 # run_train.sh creates checkpoint_bundle.tar after training and on TERM/EXIT.
