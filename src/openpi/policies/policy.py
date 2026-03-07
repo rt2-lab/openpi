@@ -55,8 +55,6 @@ class Policy(BasePolicy):
         self._is_pytorch_model = is_pytorch
         self._pytorch_device = pytorch_device
 
-        self._hardgate_enabled = getattr(model, "hardgate_enabled", False)
-
         if self._is_pytorch_model:
             self._model = self._model.to(pytorch_device)
             self._model.eval()
@@ -64,8 +62,6 @@ class Policy(BasePolicy):
         else:
             # JAX model setup
             self._sample_actions = nnx_utils.module_jit(model.sample_actions)
-            if self._hardgate_enabled:
-                self._sample_actions_with_gate = nnx_utils.module_jit(model.sample_actions_with_gate)
             self._rng = rng or jax.random.key(0)
 
     @override
@@ -93,21 +89,13 @@ class Policy(BasePolicy):
 
         observation = _model.Observation.from_dict(inputs)
         start_time = time.monotonic()
-
-        gate_prob = None
-        if self._hardgate_enabled and not self._is_pytorch_model:
-            actions, gate_prob_arr = self._sample_actions_with_gate(
-                sample_rng_or_pytorch_device, observation, **sample_kwargs
-            )
-            gate_prob = float(np.asarray(gate_prob_arr[0]))
-        else:
-            actions = self._sample_actions(sample_rng_or_pytorch_device, observation, **sample_kwargs)
+        actions = self._sample_actions(sample_rng_or_pytorch_device, observation, **sample_kwargs)
+        model_time = time.monotonic() - start_time
 
         outputs = {
             "state": inputs["state"],
             "actions": actions,
         }
-        model_time = time.monotonic() - start_time
         if self._is_pytorch_model:
             outputs = jax.tree.map(lambda x: np.asarray(x[0, ...].detach().cpu()), outputs)
         else:
@@ -117,8 +105,6 @@ class Policy(BasePolicy):
         outputs["policy_timing"] = {
             "infer_ms": model_time * 1000,
         }
-        if gate_prob is not None:
-            outputs["gate_prob"] = gate_prob
         return outputs
 
     def infer_batch(self, obs: dict, num_samples: int) -> dict:

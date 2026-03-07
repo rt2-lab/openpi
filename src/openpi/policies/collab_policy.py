@@ -72,9 +72,6 @@ class CollabInputs(transforms.DataTransformFn):
         if "actions" in data:
             inputs["actions"] = data["actions"]
 
-        if "turn_label" in data:
-            inputs["turn_label"] = np.asarray(data["turn_label"], dtype=np.float32).squeeze()
-
         if "prompt" in data:
             inputs["prompt"] = data["prompt"]
 

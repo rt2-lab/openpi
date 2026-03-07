@@ -387,7 +387,6 @@ class LeRobotCollabDataConfig(DataConfigFactory):
                         "observation/state": "state",
                         "actions": "actions",
                         "prompt": "prompt",
-                        "observation/turn_label": "turn_label",
                     }
                 )
             ]
@@ -1093,42 +1092,6 @@ _CONFIGS = [
         num_train_steps=25000,
         save_interval=5000,
     ),
-    #
-    # Handover derisk hard-gate configs (joint and gate-only).
-    #
-    TrainConfig(
-        name="pi0_handover_derisk_jointgate",
-        project_name="Handover Derisk",
-        wandb_entity="RT2-DIFFUSE",
-        wandb_group="OpenPI (Handover Derisk Gate)",
-        wandb_tags=("openpi", "handover_derisk", "pi0", "hardgate", "joint"),
-        model=pi0_config.Pi0Config(action_dim=32, action_horizon=16, hardgate_enabled=True),
-        data=LeRobotCollabDataConfig(
-            repo_id="local/handover_derisk",
-            base_config=DataConfig(prompt_from_task=True),
-        ),
-        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
-        num_train_steps=25000,
-        save_interval=5000,
-    ),
-    TrainConfig(
-        name="pi0_handover_derisk_gateonly",
-        project_name="Handover Derisk",
-        wandb_entity="RT2-DIFFUSE",
-        wandb_group="OpenPI (Handover Derisk Gate)",
-        wandb_tags=("openpi", "handover_derisk", "pi0", "hardgate", "gate_only"),
-        model=pi0_config.Pi0Config(action_dim=32, action_horizon=16, hardgate_enabled=True),
-        data=LeRobotCollabDataConfig(
-            repo_id="local/handover_derisk",
-            base_config=DataConfig(prompt_from_task=True),
-        ),
-        # Point to a fine-tuned checkpoint (update this path for your run).
-        weight_loader=weight_loaders.CheckpointWeightLoader("checkpoints/pi0_handover_derisk/<exp_name>/5000/params"),
-        freeze_filter=nnx.Not(nnx_utils.PathRegex(".*gate_(hidden|out).*")),
-        num_train_steps=5000,
-        save_interval=1000,
-    ),
-
     # Handover derisk fine-tuning configs.
     # Same robot/format as collab — reuses LeRobotCollabDataConfig with a different repo_id.
     #
