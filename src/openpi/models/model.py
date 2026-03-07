@@ -99,6 +99,9 @@ class Observation(Generic[ArrayT]):
     # Tokenized prompt mask.
     tokenized_prompt_mask: at.Bool[ArrayT, "*b l"] | None = None
 
+    # Hard gate turn label (1.0 = move, 0.0 = hold). Training only.
+    turn_label: at.Float[ArrayT, "*b"] | None = None
+
     # pi0-fast model specific fields.
 
     # Token auto-regressive mask (for FAST autoregressive model).
@@ -122,6 +125,7 @@ class Observation(Generic[ArrayT]):
             images=data["image"],
             image_masks=data["image_mask"],
             state=data["state"],
+            turn_label=data.get("turn_label"),
             tokenized_prompt=data.get("tokenized_prompt"),
             tokenized_prompt_mask=data.get("tokenized_prompt_mask"),
             token_ar_mask=data.get("token_ar_mask"),

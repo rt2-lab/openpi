@@ -9,6 +9,7 @@ import torch.nn.functional as F  # noqa: N812
 import openpi.models.gemma as _gemma
 from openpi.models_pytorch.gemma_pytorch import PaliGemmaWithExpertModel
 import openpi.models_pytorch.preprocessing_pytorch as _preprocessing
+from transformers.cache_utils import DynamicCache
 
 
 def get_safe_dtype(target_dtype, device_type):
@@ -414,6 +415,66 @@ class PI0Pytorch(nn.Module):
             )
 
             # Euler step - use new tensor assignment instead of in-place operation
+            x_t = x_t + dt * v_t
+            time += dt
+        return x_t
+
+    @torch.no_grad()
+    def sample_actions_batch(self, device, observation, num_samples, num_steps=10) -> Tensor:
+        """Sample N action trajectories from a single observation in one batched pass.
+
+        Encodes the prefix (images + language) once, tiles the KV cache to
+        num_samples, then runs the flow-matching ODE with independent noise.
+        """
+        images, img_masks, lang_tokens, lang_masks, state = self._preprocess_observation(observation, train=False)
+
+        prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(images, img_masks, lang_tokens, lang_masks)
+        prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
+        prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
+
+        prefix_att_2d_masks_4d = self._prepare_attention_masks_4d(prefix_att_2d_masks)
+        self.paligemma_with_expert.paligemma.language_model.config._attn_implementation = "eager"  # noqa: SLF001
+
+        _, past_key_values = self.paligemma_with_expert.forward(
+            attention_mask=prefix_att_2d_masks_4d,
+            position_ids=prefix_position_ids,
+            past_key_values=None,
+            inputs_embeds=[prefix_embs, None],
+            use_cache=True,
+        )
+
+        # Tile KV cache from batch=1 to batch=num_samples (read-only view).
+        tiled_cache = DynamicCache()
+        for layer_idx in range(len(past_key_values)):
+            k = past_key_values.key_cache[layer_idx]
+            v = past_key_values.value_cache[layer_idx]
+            tiled_cache.update(
+                k.expand(num_samples, -1, -1, -1),
+                v.expand(num_samples, -1, -1, -1),
+                layer_idx,
+            )
+
+        state = state.expand(num_samples, -1)
+        prefix_pad_masks = prefix_pad_masks.expand(num_samples, -1)
+
+        noise = self.sample_noise(
+            (num_samples, self.config.action_horizon, self.config.action_dim), device
+        )
+
+        dt = -1.0 / num_steps
+        dt = torch.tensor(dt, dtype=torch.float32, device=device)
+
+        x_t = noise
+        time = torch.tensor(1.0, dtype=torch.float32, device=device)
+        while time >= -dt / 2:
+            expanded_time = time.expand(num_samples)
+            v_t = self.denoise_step(
+                state,
+                prefix_pad_masks,
+                tiled_cache,
+                x_t,
+                expanded_time,
+            )
             x_t = x_t + dt * v_t
             time += dt
         return x_t

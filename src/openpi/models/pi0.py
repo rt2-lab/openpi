@@ -5,6 +5,7 @@ import flax.nnx as nnx
 import flax.nnx.bridge as nnx_bridge
 import jax
 import jax.numpy as jnp
+import optax
 from typing_extensions import override
 
 from openpi.models import model as _model
@@ -99,6 +100,16 @@ class Pi0(_model.BaseModel):
             self.action_time_mlp_out = nnx.Linear(action_expert_config.width, action_expert_config.width, rngs=rngs)
         self.action_out_proj = nnx.Linear(action_expert_config.width, config.action_dim, rngs=rngs)
 
+        # Hard gate head: pool post-Gemma image tokens → binary move/hold logit.
+        self.hardgate_enabled = config.hardgate_enabled
+        if config.hardgate_enabled:
+            gate_dim = paligemma_config.width * 2
+            self.gate_hidden = nnx.Linear(gate_dim, config.hardgate_hidden_dim, rngs=rngs)
+            self.gate_out = nnx.Linear(config.hardgate_hidden_dim, 1, rngs=rngs)
+            self.hardgate_loss_weight = config.hardgate_loss_weight
+            self.hardgate_threshold = config.hardgate_threshold
+            self.num_img_patches = (_model.IMAGE_RESOLUTION[0] // 14) ** 2
+
         # This attribute gets automatically set by model.train() and model.eval().
         self.deterministic = True
 
@@ -185,6 +196,14 @@ class Pi0(_model.BaseModel):
         ar_mask = jnp.array(ar_mask)
         return tokens, input_mask, ar_mask, adarms_cond
 
+    def _gate_logit(self, prefix_out):
+        """Pool mount + gripper image tokens from prefix_out, return gate logit."""
+        n = self.num_img_patches
+        mount_pool = jnp.mean(prefix_out[:, :n, :], axis=1)
+        gripper_pool = jnp.mean(prefix_out[:, n : 2 * n, :], axis=1)
+        h = nnx.relu(self.gate_hidden(jnp.concatenate([mount_pool, gripper_pool], axis=-1)))
+        return self.gate_out(h).squeeze(-1)
+
     @override
     def compute_loss(
         self, rng: at.KeyArrayLike, observation: _model.Observation, actions: _model.Actions, *, train: bool = False
@@ -211,7 +230,14 @@ class Pi0(_model.BaseModel):
         )
         v_t = self.action_out_proj(suffix_out[:, -self.action_horizon :])
 
-        return jnp.mean(jnp.square(v_t - u_t), axis=-1)
+        flow_loss = jnp.mean(jnp.square(v_t - u_t), axis=-1)
+
+        if self.hardgate_enabled and observation.turn_label is not None:
+            gate_logit = self._gate_logit(prefix_out)
+            gate_bce = optax.sigmoid_binary_cross_entropy(gate_logit, observation.turn_label)
+            flow_loss = flow_loss + self.hardgate_loss_weight * gate_bce[:, None]
+
+        return flow_loss
 
     @override
     def sample_actions(
@@ -277,3 +303,68 @@ class Pi0(_model.BaseModel):
 
         x_0, _ = jax.lax.while_loop(cond, step, (noise, 1.0))
         return x_0
+
+    def sample_actions_with_gate(
+        self,
+        rng: at.KeyArrayLike,
+        observation: _model.Observation,
+        *,
+        num_steps: int | at.Int[at.Array, ""] = 10,
+        noise: at.Float[at.Array, "b ah ad"] | None = None,
+    ) -> tuple[_model.Actions, at.Float[at.Array, " b"]]:
+        """Like sample_actions but skips the ODE loop when the gate says hold.
+
+        Reuses the same prefix forward pass for both the gate head and KV cache.
+        Returns (actions, gate_prob). Actions are zeros when the gate predicts hold.
+        """
+        observation = _model.preprocess_observation(None, observation, train=False)
+        dt = -1.0 / num_steps
+        batch_size = observation.state.shape[0]
+        if noise is None:
+            noise = jax.random.normal(rng, (batch_size, self.action_horizon, self.action_dim))
+
+        prefix_tokens, prefix_mask, prefix_ar_mask = self.embed_prefix(observation)
+        prefix_attn_mask = make_attn_mask(prefix_mask, prefix_ar_mask)
+        positions = jnp.cumsum(prefix_mask, axis=1) - 1
+        (prefix_out, _), kv_cache = self.PaliGemma.llm(
+            [prefix_tokens, None], mask=prefix_attn_mask, positions=positions
+        )
+
+        gate_logit = self._gate_logit(prefix_out)
+        gate_prob = jax.nn.sigmoid(gate_logit)
+
+        should_denoise = jnp.any(gate_prob >= self.hardgate_threshold)
+
+        def denoise(_):
+            def step(carry):
+                x_t, time = carry
+                suffix_tokens, suffix_mask, suffix_ar_mask, adarms_cond = self.embed_suffix(
+                    observation, x_t, jnp.broadcast_to(time, batch_size)
+                )
+                suffix_attn_mask = make_attn_mask(suffix_mask, suffix_ar_mask)
+                pfx_attn_mask = einops.repeat(prefix_mask, "b p -> b s p", s=suffix_tokens.shape[1])
+                full_attn_mask = jnp.concatenate([pfx_attn_mask, suffix_attn_mask], axis=-1)
+                pos = jnp.sum(prefix_mask, axis=-1)[:, None] + jnp.cumsum(suffix_mask, axis=-1) - 1
+
+                (_, suffix_out), _ = self.PaliGemma.llm(
+                    [None, suffix_tokens],
+                    mask=full_attn_mask,
+                    positions=pos,
+                    kv_cache=kv_cache,
+                    adarms_cond=[None, adarms_cond],
+                )
+                v_t = self.action_out_proj(suffix_out[:, -self.action_horizon :])
+                return x_t + dt * v_t, time + dt
+
+            def loop_cond(carry):
+                _, time = carry
+                return time >= -dt / 2
+
+            x_0, _ = jax.lax.while_loop(loop_cond, step, (noise, 1.0))
+            return x_0
+
+        def skip(_):
+            return jnp.zeros_like(noise)
+
+        actions = jax.lax.cond(should_denoise, denoise, skip, None)
+        return actions, gate_prob

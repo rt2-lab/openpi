@@ -55,6 +55,8 @@ class Policy(BasePolicy):
         self._is_pytorch_model = is_pytorch
         self._pytorch_device = pytorch_device
 
+        self._hardgate_enabled = getattr(model, "hardgate_enabled", False)
+
         if self._is_pytorch_model:
             self._model = self._model.to(pytorch_device)
             self._model.eval()
@@ -62,6 +64,8 @@ class Policy(BasePolicy):
         else:
             # JAX model setup
             self._sample_actions = nnx_utils.module_jit(model.sample_actions)
+            if self._hardgate_enabled:
+                self._sample_actions_with_gate = nnx_utils.module_jit(model.sample_actions_with_gate)
             self._rng = rng or jax.random.key(0)
 
     @override
@@ -89,9 +93,19 @@ class Policy(BasePolicy):
 
         observation = _model.Observation.from_dict(inputs)
         start_time = time.monotonic()
+
+        gate_prob = None
+        if self._hardgate_enabled and not self._is_pytorch_model:
+            actions, gate_prob_arr = self._sample_actions_with_gate(
+                sample_rng_or_pytorch_device, observation, **sample_kwargs
+            )
+            gate_prob = float(np.asarray(gate_prob_arr[0]))
+        else:
+            actions = self._sample_actions(sample_rng_or_pytorch_device, observation, **sample_kwargs)
+
         outputs = {
             "state": inputs["state"],
-            "actions": self._sample_actions(sample_rng_or_pytorch_device, observation, **sample_kwargs),
+            "actions": actions,
         }
         model_time = time.monotonic() - start_time
         if self._is_pytorch_model:
@@ -103,7 +117,54 @@ class Policy(BasePolicy):
         outputs["policy_timing"] = {
             "infer_ms": model_time * 1000,
         }
+        if gate_prob is not None:
+            outputs["gate_prob"] = gate_prob
         return outputs
+
+    def infer_batch(self, obs: dict, num_samples: int) -> dict:
+        """Run batched inference: N action samples from a single observation.
+
+        For PyTorch models, encodes the prefix once and tiles the KV cache.
+        For JAX models, tiles the observation and calls sample_actions with batch=N.
+        """
+        inputs = jax.tree.map(lambda x: x, obs)
+        inputs = self._input_transform(inputs)
+
+        if self._is_pytorch_model:
+            inputs = jax.tree.map(
+                lambda x: torch.from_numpy(np.array(x)).to(self._pytorch_device)[None, ...], inputs
+            )
+            observation = _model.Observation.from_dict(inputs)
+            start_time = time.monotonic()
+            actions = self._model.sample_actions_batch(
+                self._pytorch_device, observation, num_samples, **self._sample_kwargs
+            )
+            model_time = time.monotonic() - start_time
+            actions_np = np.asarray(actions.detach().cpu())
+            state_np = np.asarray(inputs["state"][0].detach().cpu())
+        else:
+            inputs = jax.tree.map(lambda x: jnp.asarray(x), inputs)
+            inputs = jax.tree.map(
+                lambda x: jnp.broadcast_to(x[np.newaxis, ...], (num_samples, *x.shape)), inputs
+            )
+            self._rng, sample_rng = jax.random.split(self._rng)
+            observation = _model.Observation.from_dict(inputs)
+            start_time = time.monotonic()
+            actions = self._sample_actions(sample_rng, observation, **self._sample_kwargs)
+            model_time = time.monotonic() - start_time
+            actions_np = np.asarray(actions)
+            state_np = np.asarray(inputs["state"][0])
+
+        all_actions = []
+        for i in range(num_samples):
+            sample_out = {"state": state_np, "actions": actions_np[i]}
+            sample_out = self._output_transform(sample_out)
+            all_actions.append(sample_out["actions"])
+
+        return {
+            "actions": np.stack(all_actions, axis=0),
+            "policy_timing": {"infer_ms": model_time * 1000},
+        }
 
     @property
     def metadata(self) -> dict[str, Any]:

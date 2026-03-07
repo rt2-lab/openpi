@@ -23,6 +23,7 @@ import openpi.policies.droid_policy as droid_policy
 import openpi.policies.libero_policy as libero_policy
 import openpi.shared.download as _download
 import openpi.shared.normalize as _normalize
+import openpi.shared.nnx_utils as nnx_utils
 import openpi.training.droid_rlds_dataset as droid_rlds_dataset
 import openpi.training.misc.polaris_config as polaris_config
 import openpi.training.misc.roboarena_config as roboarena_config
@@ -386,6 +387,7 @@ class LeRobotCollabDataConfig(DataConfigFactory):
                         "observation/state": "state",
                         "actions": "actions",
                         "prompt": "prompt",
+                        "observation/turn_label": "turn_label",
                     }
                 )
             ]
@@ -1090,6 +1092,41 @@ _CONFIGS = [
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         num_train_steps=25000,
         save_interval=5000,
+    ),
+    #
+    # Handover derisk hard-gate configs (joint and gate-only).
+    #
+    TrainConfig(
+        name="pi0_handover_derisk_jointgate",
+        project_name="Handover Derisk",
+        wandb_entity="RT2-DIFFUSE",
+        wandb_group="OpenPI (Handover Derisk Gate)",
+        wandb_tags=("openpi", "handover_derisk", "pi0", "hardgate", "joint"),
+        model=pi0_config.Pi0Config(action_dim=32, action_horizon=16, hardgate_enabled=True),
+        data=LeRobotCollabDataConfig(
+            repo_id="local/handover_derisk",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=25000,
+        save_interval=5000,
+    ),
+    TrainConfig(
+        name="pi0_handover_derisk_gateonly",
+        project_name="Handover Derisk",
+        wandb_entity="RT2-DIFFUSE",
+        wandb_group="OpenPI (Handover Derisk Gate)",
+        wandb_tags=("openpi", "handover_derisk", "pi0", "hardgate", "gate_only"),
+        model=pi0_config.Pi0Config(action_dim=32, action_horizon=16, hardgate_enabled=True),
+        data=LeRobotCollabDataConfig(
+            repo_id="local/handover_derisk",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        # Point to a fine-tuned checkpoint (update this path for your run).
+        weight_loader=weight_loaders.CheckpointWeightLoader("checkpoints/pi0_handover_derisk/<exp_name>/5000/params"),
+        freeze_filter=nnx.Not(nnx_utils.PathRegex(".*gate_(hidden|out).*")),
+        num_train_steps=5000,
+        save_interval=1000,
     ),
 
     # Handover derisk fine-tuning configs.

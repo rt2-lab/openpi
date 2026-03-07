@@ -32,6 +32,12 @@ class Pi0Config(_model.BaseModelConfig):
     # This config option is not used directly by the model, but it is read by the ModelTransformFactory.
     discrete_state_input: bool = None  # type: ignore
 
+    # Hard gate: binary move/hold prediction from post-Gemma image tokens.
+    hardgate_enabled: bool = False
+    hardgate_hidden_dim: int = 256
+    hardgate_loss_weight: float = 1.0
+    hardgate_threshold: float = 0.5
+
     def __post_init__(self):
         if self.max_token_len is None:
             object.__setattr__(self, "max_token_len", 200 if self.pi05 else 48)

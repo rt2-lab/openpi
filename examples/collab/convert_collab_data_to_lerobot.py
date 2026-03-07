@@ -83,6 +83,11 @@ def main(
                 "shape": (8,),
                 "names": ["actions"],
             },
+            "turn_label": {
+                "dtype": "float32",
+                "shape": (1,),
+                "names": ["turn_label"],
+            },
         },
         image_writer_threads=10,
         image_writer_processes=5,
@@ -109,6 +114,12 @@ def main(
             # Action = desired pose (7D) + gripper cmd (1D) = 8D
             actions = np.concatenate([desired_pose, gripper_cmd], axis=1)
 
+            has_turn = "turn" in f
+            if has_turn:
+                turn_labels = np.array(f["turn"][:], dtype=np.float32)
+            else:
+                turn_labels = np.ones(ep_len, dtype=np.float32)
+
             for frame_idx in frame_indices:
                 # Decode gripper image
                 gripper_jpeg = np.array(f["gripper_image_rgb_compressed"][frame_idx])
@@ -128,6 +139,7 @@ def main(
                         "gripper_image": gripper_img,
                         "state": states[frame_idx],
                         "actions": actions[frame_idx],
+                        "turn_label": np.array([turn_labels[frame_idx]], dtype=np.float32),
                         "task": default_task,
                     }
                 )
