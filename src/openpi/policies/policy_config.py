@@ -3,6 +3,8 @@ import os
 import pathlib
 from typing import Any
 
+os.environ["XLA_FLAGS"] = os.environ.get("XLA_FLAGS", "") + " --xla_gpu_autotune_level=4"
+
 import jax.numpy as jnp
 
 import openpi.models.model as _model

@@ -29,7 +29,7 @@ from collections.abc import Sequence
 import dataclasses
 from typing import Literal, TypeAlias
 
-import einops
+
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
@@ -213,22 +213,12 @@ class Attention(nn.Module):
             k = jnp.concatenate([cache_k, k], axis=1)
             v = jnp.concatenate([cache_v, v], axis=1)
 
-        q = einops.rearrange(q, "B T (K G) H -> B T K G H", K=self.configs[0].num_kv_heads)
-        logits = jnp.einsum("BTKGH,BSKH->BKGTS", q, k, preferred_element_type=jnp.float32)
-
-        if attn_mask.shape != (q.shape[0], 1, q.shape[1], k.shape[1]):
-            raise ValueError(
-                f"Attention mask with shape {attn_mask.shape} but shapes for q and k are: {q.shape} and {k.shape}"
-            )
-
-        # big_neg = jnp.finfo(logits.dtype).min
-        big_neg = -2.3819763e38  # See gemma/modules.py
-        masked_logits = jnp.where(attn_mask[:, :, None, :, :], logits, big_neg)
-
-        probs = jax.nn.softmax(masked_logits, axis=-1).astype(dtype)
-
-        encoded = jnp.einsum("BKGTS,BSKH->BTKGH", probs, v)
-        encoded = einops.rearrange(encoded, "B T K G H -> B T (K G) H")
+        # attn_mask (B, 1, T, S) broadcasts to (B, N, T, S) for GQA/MQA
+        encoded = jax.nn.dot_product_attention(
+            q, k, v,
+            mask=attn_mask,
+            scale=1.0,  # Q already scaled above
+        )
 
         out = []
         start = 0

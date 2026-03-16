@@ -236,7 +236,7 @@ class Pi0(_model.BaseModel):
         positions = jnp.cumsum(prefix_mask, axis=1) - 1
         _, kv_cache = self.PaliGemma.llm([prefix_tokens, None], mask=prefix_attn_mask, positions=positions)
 
-        def step(carry):
+        def step(i, carry):
             x_t, time = carry
             suffix_tokens, suffix_mask, suffix_ar_mask, adarms_cond = self.embed_suffix(
                 observation, x_t, jnp.broadcast_to(time, batch_size)
@@ -270,10 +270,65 @@ class Pi0(_model.BaseModel):
 
             return x_t + dt * v_t, time + dt
 
-        def cond(carry):
-            x_t, time = carry
-            # robust to floating-point error
-            return time >= -dt / 2
+        x_0, _ = jax.lax.fori_loop(0, num_steps, step, (noise, 1.0))
+        return x_0
 
-        x_0, _ = jax.lax.while_loop(cond, step, (noise, 1.0))
+    def sample_actions_batch(
+        self,
+        rng: at.KeyArrayLike,
+        observation: _model.Observation,
+        num_samples: int,
+        *,
+        num_steps: int | at.Int[at.Array, ""] = 10,
+    ) -> _model.Actions:
+        """Sample N action trajectories from a single observation.
+
+        Encodes the prefix once at batch=1, then broadcasts the KV cache
+        to batch=N so only the denoising loop pays the batch cost.
+        """
+        observation = _model.preprocess_observation(None, observation, train=False)
+        dt = -1.0 / num_steps
+
+        # --- Prefix at batch=1 ---
+        prefix_tokens, prefix_mask, prefix_ar_mask = self.embed_prefix(observation)
+        prefix_attn_mask = make_attn_mask(prefix_mask, prefix_ar_mask)
+        positions = jnp.cumsum(prefix_mask, axis=1) - 1
+        _, kv_cache = self.PaliGemma.llm([prefix_tokens, None], mask=prefix_attn_mask, positions=positions)
+
+        # --- Broadcast to batch=N (zero-copy views) ---
+        kv_cache = jax.tree.map(
+            lambda x: jnp.broadcast_to(x, (x.shape[0], num_samples, *x.shape[2:])),
+            kv_cache,
+        )
+        prefix_mask = jnp.broadcast_to(prefix_mask, (num_samples, prefix_mask.shape[1]))
+        observation = jax.tree.map(
+            lambda x: jnp.broadcast_to(x, (num_samples, *x.shape[1:])),
+            observation,
+        )
+
+        batch_size = num_samples
+        noise = jax.random.normal(rng, (num_samples, self.action_horizon, self.action_dim))
+
+        def step(i, carry):
+            x_t, time = carry
+            suffix_tokens, suffix_mask, suffix_ar_mask, adarms_cond = self.embed_suffix(
+                observation, x_t, jnp.broadcast_to(time, batch_size)
+            )
+            suffix_attn_mask = make_attn_mask(suffix_mask, suffix_ar_mask)
+            prefix_attn_mask = einops.repeat(prefix_mask, "b p -> b s p", s=suffix_tokens.shape[1])
+            full_attn_mask = jnp.concatenate([prefix_attn_mask, suffix_attn_mask], axis=-1)
+            positions = jnp.sum(prefix_mask, axis=-1)[:, None] + jnp.cumsum(suffix_mask, axis=-1) - 1
+
+            (_, suffix_out), _ = self.PaliGemma.llm(
+                [None, suffix_tokens],
+                mask=full_attn_mask,
+                positions=positions,
+                kv_cache=kv_cache,
+                adarms_cond=[None, adarms_cond],
+            )
+            v_t = self.action_out_proj(suffix_out[:, -self.action_horizon :])
+
+            return x_t + dt * v_t, time + dt
+
+        x_0, _ = jax.lax.fori_loop(0, num_steps, step, (noise, 1.0))
         return x_0

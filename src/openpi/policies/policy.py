@@ -62,6 +62,12 @@ class Policy(BasePolicy):
         else:
             # JAX model setup
             self._sample_actions = nnx_utils.module_jit(model.sample_actions)
+            if hasattr(model, "sample_actions_batch"):
+                self._sample_actions_batch = nnx_utils.module_jit(
+                    model.sample_actions_batch, static_argnums=(3,)
+                )
+            else:
+                self._sample_actions_batch = None
             self._rng = rng or jax.random.key(0)
 
     @override
@@ -130,16 +136,27 @@ class Policy(BasePolicy):
             state_np = np.asarray(inputs["state"][0].detach().cpu())
         else:
             inputs = jax.tree.map(lambda x: jnp.asarray(x), inputs)
-            inputs = jax.tree.map(
-                lambda x: jnp.broadcast_to(x[np.newaxis, ...], (num_samples, *x.shape)), inputs
-            )
+            state_np = np.asarray(inputs["state"])
             self._rng, sample_rng = jax.random.split(self._rng)
-            observation = _model.Observation.from_dict(inputs)
-            start_time = time.monotonic()
-            actions = self._sample_actions(sample_rng, observation, **self._sample_kwargs)
-            model_time = time.monotonic() - start_time
+
+            if self._sample_actions_batch is not None:
+                inputs_b1 = jax.tree.map(lambda x: x[np.newaxis, ...], inputs)
+                observation = _model.Observation.from_dict(inputs_b1)
+                start_time = time.monotonic()
+                actions = self._sample_actions_batch(
+                    sample_rng, observation, num_samples, **self._sample_kwargs
+                )
+                model_time = time.monotonic() - start_time
+            else:
+                inputs = jax.tree.map(
+                    lambda x: jnp.broadcast_to(x[np.newaxis, ...], (num_samples, *x.shape)), inputs
+                )
+                observation = _model.Observation.from_dict(inputs)
+                start_time = time.monotonic()
+                actions = self._sample_actions(sample_rng, observation, **self._sample_kwargs)
+                model_time = time.monotonic() - start_time
+
             actions_np = np.asarray(actions)
-            state_np = np.asarray(inputs["state"][0])
 
         all_actions = []
         for i in range(num_samples):
