@@ -1158,6 +1158,21 @@ _CONFIGS = [
         num_train_steps=25000,
         save_interval=5000,
     ),
+    TrainConfig(
+        name="pi05_mixed_derisk_long",
+        project_name="Mixed Derisk Long",
+        wandb_entity="RT2-DIFFUSE",
+        wandb_group="OpenPI (Mixed Derisk Long)",
+        wandb_tags=("openpi", "mixed_derisk_long", "pi05"),
+        model=pi0_config.Pi0Config(pi05=True, action_dim=32, action_horizon=64),
+        data=LeRobotCollabDataConfig(
+            repo_id="local/mixed_derisk",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=25000,
+        save_interval=25000,
+    ),
     #
     # Collab (xArm) LoRA fine-tuning configs.
     #
