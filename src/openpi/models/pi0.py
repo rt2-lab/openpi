@@ -273,6 +273,23 @@ class Pi0(_model.BaseModel):
         x_0, _ = jax.lax.fori_loop(0, num_steps, step, (noise, 1.0))
         return x_0
 
+    def _encode_prefix(
+        self,
+        observation: _model.Observation,
+    ) -> tuple[at.Bool[at.Array, "1 s"], at.PyTree]:
+        """Encode prefix (vision + text) into a KV cache. Batch=1.
+
+        Factored out so it can be JIT-compiled independently for FK steering.
+        """
+        observation = _model.preprocess_observation(None, observation, train=False)
+        prefix_tokens, prefix_mask, prefix_ar_mask = self.embed_prefix(observation)
+        prefix_attn_mask = make_attn_mask(prefix_mask, prefix_ar_mask)
+        positions = jnp.cumsum(prefix_mask, axis=1) - 1
+        _, kv_cache = self.PaliGemma.llm(
+            [prefix_tokens, None], mask=prefix_attn_mask, positions=positions,
+        )
+        return prefix_mask, kv_cache
+
     def sample_actions_batch(
         self,
         rng: at.KeyArrayLike,
@@ -286,16 +303,9 @@ class Pi0(_model.BaseModel):
         Encodes the prefix once at batch=1, then broadcasts the KV cache
         to batch=N so only the denoising loop pays the batch cost.
         """
-        observation = _model.preprocess_observation(None, observation, train=False)
+        prefix_mask, kv_cache = self._encode_prefix(observation)
         dt = -1.0 / num_steps
 
-        # --- Prefix at batch=1 ---
-        prefix_tokens, prefix_mask, prefix_ar_mask = self.embed_prefix(observation)
-        prefix_attn_mask = make_attn_mask(prefix_mask, prefix_ar_mask)
-        positions = jnp.cumsum(prefix_mask, axis=1) - 1
-        _, kv_cache = self.PaliGemma.llm([prefix_tokens, None], mask=prefix_attn_mask, positions=positions)
-
-        # --- Broadcast to batch=N (zero-copy views) ---
         kv_cache = jax.tree.map(
             lambda x: jnp.broadcast_to(x, (x.shape[0], num_samples, *x.shape[2:])),
             kv_cache,
@@ -306,17 +316,36 @@ class Pi0(_model.BaseModel):
             observation,
         )
 
-        batch_size = num_samples
         noise = jax.random.normal(rng, (num_samples, self.action_horizon, self.action_dim))
+        x_0, _ = self._denoise_segment(observation, prefix_mask, kv_cache,
+                                        noise, 1.0, num_steps, dt, num_samples)
+        return x_0
 
+    def _denoise_segment(
+        self,
+        observation: _model.Observation,
+        prefix_mask: at.Bool[at.Array, "b s"],
+        kv_cache,
+        x_t: at.Float[at.Array, "b ah ad"],
+        start_time: float,
+        num_steps: int | at.Int[at.Array, ""],
+        dt: float,
+        batch_size: int,
+    ) -> tuple[_model.Actions, float]:
+        """Run `num_steps` of flow-matching denoising from `start_time`.
+
+        Returns (x_t, end_time).  Factored out so FK steering can call it
+        in segments between resampling points — each segment compiles to
+        a single fused XLA fori_loop.
+        """
         def step(i, carry):
             x_t, time = carry
             suffix_tokens, suffix_mask, suffix_ar_mask, adarms_cond = self.embed_suffix(
                 observation, x_t, jnp.broadcast_to(time, batch_size)
             )
             suffix_attn_mask = make_attn_mask(suffix_mask, suffix_ar_mask)
-            prefix_attn_mask = einops.repeat(prefix_mask, "b p -> b s p", s=suffix_tokens.shape[1])
-            full_attn_mask = jnp.concatenate([prefix_attn_mask, suffix_attn_mask], axis=-1)
+            prefix_attn_mask_step = einops.repeat(prefix_mask, "b p -> b s p", s=suffix_tokens.shape[1])
+            full_attn_mask = jnp.concatenate([prefix_attn_mask_step, suffix_attn_mask], axis=-1)
             positions = jnp.sum(prefix_mask, axis=-1)[:, None] + jnp.cumsum(suffix_mask, axis=-1) - 1
 
             (_, suffix_out), _ = self.PaliGemma.llm(
@@ -327,8 +356,7 @@ class Pi0(_model.BaseModel):
                 adarms_cond=[None, adarms_cond],
             )
             v_t = self.action_out_proj(suffix_out[:, -self.action_horizon :])
-
             return x_t + dt * v_t, time + dt
 
-        x_0, _ = jax.lax.fori_loop(0, num_steps, step, (noise, 1.0))
-        return x_0
+        x_out, end_time = jax.lax.fori_loop(0, num_steps, step, (x_t, start_time))
+        return x_out, end_time

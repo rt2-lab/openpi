@@ -21,6 +21,38 @@ from openpi.shared import nnx_utils
 BasePolicy: TypeAlias = _base_policy.BasePolicy
 
 
+def _extract_jax_output_params(output_transform) -> dict | None:
+    """Extract action norm stats and delta mask from the output transform chain as JAX arrays.
+
+    Walks the CompositeTransform to find Unnormalize (norm stats for actions),
+    AbsoluteActions (delta mask), and action_dim.  Returns a dict of JAX arrays
+    that _to_physical_jax can use to replicate the full output transform on-device.
+    """
+    if not hasattr(output_transform, "transforms"):
+        return None
+
+    params: dict[str, Any] = {}
+    for t in output_transform.transforms:
+        if isinstance(t, _transforms.Unnormalize) and t.norm_stats is not None:
+            action_stats = t.norm_stats.get("actions")
+            if action_stats is not None:
+                params["use_quantiles"] = t.use_quantiles
+                params["mean"] = jnp.array(action_stats.mean, dtype=jnp.float32)
+                params["std"] = jnp.array(action_stats.std, dtype=jnp.float32)
+                if t.use_quantiles and action_stats.q01 is not None:
+                    params["q01"] = jnp.array(action_stats.q01, dtype=jnp.float32)
+                    params["q99"] = jnp.array(action_stats.q99, dtype=jnp.float32)
+        elif isinstance(t, _transforms.AbsoluteActions) and t.mask is not None:
+            params["delta_mask"] = jnp.array(t.mask, dtype=jnp.bool_)
+
+    for t in output_transform.transforms:
+        if hasattr(t, "action_dim"):
+            params["action_dim"] = t.action_dim
+            break
+
+    return params if params else None
+
+
 class Policy(BasePolicy):
     def __init__(
         self,
@@ -68,7 +100,22 @@ class Policy(BasePolicy):
                 )
             else:
                 self._sample_actions_batch = None
+            if hasattr(model, "_encode_prefix"):
+                self._encode_prefix_jit = nnx_utils.module_jit(model._encode_prefix)
+            else:
+                self._encode_prefix_jit = None
+            if hasattr(model, "_denoise_segment"):
+                # After module_jit, args are: state, obs, prefix_mask, kv_cache,
+                #   x_t, start_time, num_steps, dt, batch_size
+                # num_steps (idx 6) must be static (fori_loop bound).
+                # batch_size (idx 8) must be static (broadcast_to shape).
+                self._denoise_segment_jit = nnx_utils.module_jit(
+                    model._denoise_segment, static_argnums=(6, 8)
+                )
+            else:
+                self._denoise_segment_jit = None
             self._rng = rng or jax.random.key(0)
+            self._jax_output_params = _extract_jax_output_params(self._output_transform)
 
     @override
     def infer(self, obs: dict, *, noise: np.ndarray | None = None) -> dict:  # type: ignore[misc]
@@ -112,6 +159,60 @@ class Policy(BasePolicy):
             "infer_ms": model_time * 1000,
         }
         return outputs
+
+    def infer_fk(self, obs: dict, fk_config: dict) -> dict:
+        """Run FK-steered inference: k particles with intermediate resampling."""
+        from openpi.fk_steering.rewards import build_reward
+        from openpi.fk_steering.steering import fk_sample_actions
+
+        inputs = jax.tree.map(lambda x: x, obs)
+
+        # Raw physical state BEFORE input transforms pad to model dim.
+        raw_state_np = np.asarray(inputs.get(
+            "observation/state", inputs.get("state", np.zeros(8, dtype=np.float32))
+        ), dtype=np.float32)
+
+        inputs = self._input_transform(inputs)
+        # Model-space state (post-transform, e.g. 32-dim) — needed by output transform.
+        model_state_np = np.asarray(inputs["state"])
+
+        inputs = jax.tree.map(lambda x: jnp.asarray(x)[np.newaxis, ...], inputs)
+        observation = _model.Observation.from_dict(inputs)
+
+        self._rng, sample_rng = jax.random.split(self._rng)
+        num_steps = self._sample_kwargs.get("num_steps", 10)
+
+        start_time = time.monotonic()
+        all_traj = fk_sample_actions(
+            model=self._model,
+            sample_actions_batch_jit=self._sample_actions_batch,
+            denoise_segment_jit=self._denoise_segment_jit,
+            encode_prefix_jit=self._encode_prefix_jit,
+            observation=observation,
+            rng=sample_rng,
+            fk_config=fk_config,
+            raw_state=raw_state_np,
+            model_state=model_state_np,
+            output_transform_fn=self._output_transform,
+            num_steps=num_steps,
+            jax_output_params=self._jax_output_params,
+        )
+        model_time = time.monotonic() - start_time
+
+        all_traj_np = np.asarray(all_traj)
+
+        reward_fn = build_reward(fk_config["reward"])
+        raw_state_j = jnp.array(raw_state_np, dtype=jnp.float32)
+        rewards = reward_fn(jnp.array(all_traj_np), raw_state_j)
+        best_idx = int(jnp.argmax(rewards))
+
+        return {
+            "actions": all_traj_np[best_idx],
+            "all_particles": all_traj_np,
+            "particle_rewards": np.asarray(rewards),
+            "best_particle_idx": best_idx,
+            "policy_timing": {"infer_ms": model_time * 1000},
+        }
 
     def infer_batch(self, obs: dict, num_samples: int) -> dict:
         """Run batched inference: N action samples from a single observation.

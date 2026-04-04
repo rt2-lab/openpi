@@ -58,9 +58,12 @@ class WebsocketPolicyServer:
                 obs = msgpack_numpy.unpackb(await websocket.recv())
 
                 num_samples = obs.pop("__num_samples__", None)
+                fk_config = obs.pop("__fk_config__", None)
 
                 infer_time = time.monotonic()
-                if num_samples is not None:
+                if fk_config is not None:
+                    action = self._policy.infer_fk(obs, fk_config)
+                elif num_samples is not None:
                     action = self._policy.infer_batch(obs, int(num_samples))
                 else:
                     action = self._policy.infer(obs)
