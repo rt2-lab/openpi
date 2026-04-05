@@ -41,17 +41,26 @@ class ConservativeSoftReward(BaseReward):
     """
 
     def __init__(self, sigma: float = 0.05, dims: tuple[int, int] = (0, 3),
-                 trajectory_reduction: str = "endpoint", **_: Any):
+                 trajectory_reduction: str = "endpoint",
+                 gripper_weight: float = 0.0, gripper_idx: int = 7, **_: Any):
         self.sigma = sigma
         self.dim_slice = slice(*dims)
         self.reduction = trajectory_reduction
+        self.gripper_weight = gripper_weight
+        self.gripper_idx = gripper_idx
+
+    def _dist(self, traj: jnp.ndarray, state: jnp.ndarray) -> jnp.ndarray:
+        """Compute per-timestep distance. traj: (k, ..., D), returns (k, ...)."""
+        d = jnp.linalg.norm(traj[..., self.dim_slice] - state[self.dim_slice], axis=-1)
+        if self.gripper_weight > 0:
+            d = d + self.gripper_weight * jnp.abs(traj[..., self.gripper_idx] - state[self.gripper_idx])
+        return d
 
     def __call__(self, x0_hat: jnp.ndarray, current_state: jnp.ndarray) -> jnp.ndarray:
-        state_slice = current_state[self.dim_slice]
         if self.reduction == "endpoint":
-            dist = jnp.linalg.norm(x0_hat[:, -1, self.dim_slice] - state_slice, axis=-1)
+            dist = self._dist(x0_hat[:, -1, :], current_state)
         else:
-            per_step = jnp.linalg.norm(x0_hat[:, :, self.dim_slice] - state_slice, axis=-1)  # (k, H)
+            per_step = self._dist(x0_hat, current_state)  # (k, H)
             dist = per_step.max(axis=-1) if self.reduction == "max" else per_step.mean(axis=-1)
         return jnp.exp(-dist / self.sigma)
 

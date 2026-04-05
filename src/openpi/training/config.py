@@ -1092,6 +1092,21 @@ _CONFIGS = [
         num_train_steps=25000,
         save_interval=5000,
     ),
+    TrainConfig(
+        name="pi05_handover_derisk_wait",
+        project_name="Handover Derisk Wait",
+        wandb_entity="RT2-DIFFUSE",
+        wandb_group="OpenPI (Handover Derisk Wait)",
+        wandb_tags=("openpi", "handover_derisk_wait", "pi05"),
+        model=pi0_config.Pi0Config(pi05=True, action_dim=32, action_horizon=16),
+        data=LeRobotCollabDataConfig(
+            repo_id="local/all-wait-handover-derisk",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=25000,
+        save_interval=25000,
+    ),
     # Handover derisk fine-tuning configs.
     # Same robot/format as collab — reuses LeRobotCollabDataConfig with a different repo_id.
     #
@@ -1157,6 +1172,21 @@ _CONFIGS = [
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         num_train_steps=25000,
         save_interval=5000,
+    ),
+    TrainConfig(
+        name="pi05_mixed_derisk_wait",
+        project_name="Mixed Derisk Wait",
+        wandb_entity="RT2-DIFFUSE",
+        wandb_group="OpenPI (Mixed Derisk Wait)",
+        wandb_tags=("openpi", "mixed_derisk_wait", "pi05"),
+        model=pi0_config.Pi0Config(pi05=True, action_dim=32, action_horizon=16),
+        data=LeRobotCollabDataConfig(
+            repo_id="local/all-wait-mixed-derisk",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=25000,
+        save_interval=25000,
     ),
     TrainConfig(
         name="pi05_mixed_derisk_long",
