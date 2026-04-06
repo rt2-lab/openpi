@@ -89,57 +89,68 @@ class ConservativeHardReward(BaseReward):
 
 
 class NeutralBasinReward(BaseReward):
-    """Clamped negative weighted distance to nearest basin point.
+    """exp(-dist/sigma) where dist is the distance to the nearest basin
+    point.  Reward is in [0, 1]: 1.0 on a basin, decaying toward 0 away.
+    Far-away trajectories get ~0 reward (uniform resampling, no steering).
 
-    r = clamp(-min_m d(endpoint, basin_m), min_reward, 0)
+    drift_penalty (>= 0): extra multiplicative cost for trajectories that
+    move *further* from the basin than the arm's current position.  When > 0
+    the reward becomes  base * exp(-drift_penalty * max(0, d_traj - d_cur) / sigma).
+    Trajectories that approach or stay get no penalty (factor = 1).
+
+    basin_points: list of {"position": [x,y,z]} or
+                  {"position": [x,y,z], "gripper": g} when gripper_weight > 0.
     """
 
     def __init__(
         self,
         basin_points: list[dict],
-        w_pos: float = 1.0,
-        w_ori: float = 1.0,
-        w_grip: float = 1.0,
-        min_reward: float = -10.0,
-        pos_slice: tuple[int, int] = (0, 3),
-        ori_slice: tuple[int, int] = (3, 7),
-        grip_idx: int = 7,
+        sigma: float = 0.05,
+        dims: tuple[int, int] = (0, 3),
+        trajectory_reduction: str = "endpoint",
+        gripper_weight: float = 0.0,
+        gripper_idx: int = 7,
+        drift_penalty: float = 0.0,
         **_: Any,
     ):
         if not basin_points:
             raise ValueError("basin_points must be a non-empty list")
-        self.w_pos = w_pos
-        self.w_ori = w_ori
-        self.w_grip = w_grip
-        self.min_reward = min_reward
-        self.pos_slice = slice(*pos_slice)
-        self.ori_slice = slice(*ori_slice)
-        self.grip_idx = grip_idx
-
+        self.sigma = sigma
+        self.dim_slice = slice(*dims)
+        self.reduction = trajectory_reduction
+        self.gripper_weight = gripper_weight
+        self.gripper_idx = gripper_idx
+        self.drift_penalty = drift_penalty
         self._basin_pos = jnp.array([bp["position"] for bp in basin_points], dtype=jnp.float32)
-        self._basin_ori = jnp.array([bp["orientation"] for bp in basin_points], dtype=jnp.float32)
-        self._basin_grip = jnp.array([bp["gripper"] for bp in basin_points], dtype=jnp.float32)
+        if gripper_weight > 0:
+            self._basin_grip = jnp.array([bp["gripper"] for bp in basin_points], dtype=jnp.float32)
+
+    def _min_basin_dist(self, points: jnp.ndarray, gripper: jnp.ndarray | None = None) -> jnp.ndarray:
+        """Min combined distance from each point to any basin. points: (..., 3) -> (...)."""
+        shape = points.shape[:-1]
+        flat = points.reshape(-1, points.shape[-1])  # (N, 3)
+        d_pos = jnp.linalg.norm(flat[:, None, :] - self._basin_pos[None, :, :], axis=-1)  # (N, M)
+        if self.gripper_weight > 0 and gripper is not None:
+            flat_g = gripper.reshape(-1)  # (N,)
+            d_grip = jnp.abs(flat_g[:, None] - self._basin_grip[None, :])  # (N, M)
+            d_pos = d_pos + self.gripper_weight * d_grip
+        return d_pos.min(axis=-1).reshape(shape)
 
     def __call__(self, x0_hat: jnp.ndarray, current_state: jnp.ndarray) -> jnp.ndarray:
-        endpoints = x0_hat[:, -1, :]  # (k, D)
-        ep_pos = endpoints[:, self.pos_slice]    # (k, 3)
-        ep_ori = endpoints[:, self.ori_slice]    # (k, 4)
-        ep_grip = endpoints[:, self.grip_idx]    # (k,)
-
-        # (k, 1, 3) - (1, M, 3) -> (k, M)
-        d_pos = jnp.linalg.norm(
-            ep_pos[:, None, :] - self._basin_pos[None, :, :], axis=-1
-        )
-
-        dot = jnp.abs(jnp.einsum("kd,md->km", ep_ori, self._basin_ori))
-        dot = jnp.clip(dot, 0.0, 1.0)
-        d_ori = 1.0 - dot
-
-        d_grip = jnp.abs(ep_grip[:, None] - self._basin_grip[None, :])
-
-        total = self.w_pos * d_pos + self.w_ori * d_ori + self.w_grip * d_grip
-        min_dist = total.min(axis=-1)
-        return jnp.clip(-min_dist, self.min_reward, 0.0)
+        if self.reduction == "endpoint":
+            grip = x0_hat[:, -1, self.gripper_idx] if self.gripper_weight > 0 else None
+            dist = self._min_basin_dist(x0_hat[:, -1, self.dim_slice], grip)
+        else:
+            grip = x0_hat[:, :, self.gripper_idx] if self.gripper_weight > 0 else None
+            per_step = self._min_basin_dist(x0_hat[:, :, self.dim_slice], grip)  # (k, H)
+            dist = per_step.max(axis=-1) if self.reduction == "max" else per_step.mean(axis=-1)
+        reward = jnp.exp(-dist / self.sigma)
+        if self.drift_penalty > 0:
+            cur_grip = current_state[self.gripper_idx:self.gripper_idx + 1] if self.gripper_weight > 0 else None
+            dist_cur = self._min_basin_dist(current_state[self.dim_slice][None], cur_grip)  # (1,)
+            drift = jnp.maximum(0.0, dist - dist_cur.squeeze())
+            reward = reward * jnp.exp(-self.drift_penalty * drift / self.sigma)
+        return reward
 
 
 REWARD_REGISTRY: dict[str, type[BaseReward]] = {
