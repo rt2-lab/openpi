@@ -11,7 +11,6 @@ import abc
 from typing import Any
 
 import jax.numpy as jnp
-import numpy as np
 
 
 class BaseReward(abc.ABC):
@@ -41,20 +40,14 @@ class ConservativeSoftReward(BaseReward):
     """
 
     def __init__(self, sigma: float = 0.05, dims: tuple[int, int] = (0, 3),
-                 trajectory_reduction: str = "endpoint",
-                 gripper_weight: float = 0.0, gripper_idx: int = 7, **_: Any):
+                 trajectory_reduction: str = "endpoint", **_: Any):
         self.sigma = sigma
         self.dim_slice = slice(*dims)
         self.reduction = trajectory_reduction
-        self.gripper_weight = gripper_weight
-        self.gripper_idx = gripper_idx
 
     def _dist(self, traj: jnp.ndarray, state: jnp.ndarray) -> jnp.ndarray:
-        """Compute per-timestep distance. traj: (k, ..., D), returns (k, ...)."""
-        d = jnp.linalg.norm(traj[..., self.dim_slice] - state[self.dim_slice], axis=-1)
-        if self.gripper_weight > 0:
-            d = d + self.gripper_weight * jnp.abs(traj[..., self.gripper_idx] - state[self.gripper_idx])
-        return d
+        """Compute per-timestep position-space distance. traj: (k, ..., D), returns (k, ...)."""
+        return jnp.linalg.norm(traj[..., self.dim_slice] - state[self.dim_slice], axis=-1)
 
     def __call__(self, x0_hat: jnp.ndarray, current_state: jnp.ndarray) -> jnp.ndarray:
         if self.reduction == "endpoint":
@@ -98,8 +91,7 @@ class NeutralBasinReward(BaseReward):
     the reward becomes  base * exp(-drift_penalty * max(0, d_traj - d_cur) / sigma).
     Trajectories that approach or stay get no penalty (factor = 1).
 
-    basin_points: list of {"position": [x,y,z]} or
-                  {"position": [x,y,z], "gripper": g} when gripper_weight > 0.
+    basin_points: list of {"position": [x,y,z]}.
     """
 
     def __init__(
@@ -108,8 +100,6 @@ class NeutralBasinReward(BaseReward):
         sigma: float = 0.05,
         dims: tuple[int, int] = (0, 3),
         trajectory_reduction: str = "endpoint",
-        gripper_weight: float = 0.0,
-        gripper_idx: int = 7,
         drift_penalty: float = 0.0,
         **_: Any,
     ):
@@ -118,36 +108,25 @@ class NeutralBasinReward(BaseReward):
         self.sigma = sigma
         self.dim_slice = slice(*dims)
         self.reduction = trajectory_reduction
-        self.gripper_weight = gripper_weight
-        self.gripper_idx = gripper_idx
         self.drift_penalty = drift_penalty
         self._basin_pos = jnp.array([bp["position"] for bp in basin_points], dtype=jnp.float32)
-        if gripper_weight > 0:
-            self._basin_grip = jnp.array([bp["gripper"] for bp in basin_points], dtype=jnp.float32)
 
-    def _min_basin_dist(self, points: jnp.ndarray, gripper: jnp.ndarray | None = None) -> jnp.ndarray:
-        """Min combined distance from each point to any basin. points: (..., 3) -> (...)."""
+    def _min_basin_dist(self, points: jnp.ndarray) -> jnp.ndarray:
+        """Min position distance from each point to any basin. points: (..., 3) -> (...)."""
         shape = points.shape[:-1]
         flat = points.reshape(-1, points.shape[-1])  # (N, 3)
         d_pos = jnp.linalg.norm(flat[:, None, :] - self._basin_pos[None, :, :], axis=-1)  # (N, M)
-        if self.gripper_weight > 0 and gripper is not None:
-            flat_g = gripper.reshape(-1)  # (N,)
-            d_grip = jnp.abs(flat_g[:, None] - self._basin_grip[None, :])  # (N, M)
-            d_pos = d_pos + self.gripper_weight * d_grip
         return d_pos.min(axis=-1).reshape(shape)
 
     def __call__(self, x0_hat: jnp.ndarray, current_state: jnp.ndarray) -> jnp.ndarray:
         if self.reduction == "endpoint":
-            grip = x0_hat[:, -1, self.gripper_idx] if self.gripper_weight > 0 else None
-            dist = self._min_basin_dist(x0_hat[:, -1, self.dim_slice], grip)
+            dist = self._min_basin_dist(x0_hat[:, -1, self.dim_slice])
         else:
-            grip = x0_hat[:, :, self.gripper_idx] if self.gripper_weight > 0 else None
-            per_step = self._min_basin_dist(x0_hat[:, :, self.dim_slice], grip)  # (k, H)
+            per_step = self._min_basin_dist(x0_hat[:, :, self.dim_slice])  # (k, H)
             dist = per_step.max(axis=-1) if self.reduction == "max" else per_step.mean(axis=-1)
         reward = jnp.exp(-dist / self.sigma)
         if self.drift_penalty > 0:
-            cur_grip = current_state[self.gripper_idx:self.gripper_idx + 1] if self.gripper_weight > 0 else None
-            dist_cur = self._min_basin_dist(current_state[self.dim_slice][None], cur_grip)  # (1,)
+            dist_cur = self._min_basin_dist(current_state[self.dim_slice][None])  # (1,)
             drift = jnp.maximum(0.0, dist - dist_cur.squeeze())
             reward = reward * jnp.exp(-self.drift_penalty * drift / self.sigma)
         return reward
