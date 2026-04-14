@@ -126,8 +126,13 @@ class ConservativeHardReward(BaseReward):
 
 
 class NeutralBasinReward(BaseReward):
-    """Sigmoid reward based on distance to the nearest basin point, gated by
-    the current arm position's proximity to the basin.
+    """Sigmoid reward using the **closest** basin (per 3D query), gated by the arm.
+
+    For each 3D position (current EE, trajectory endpoint, or each waypoint when
+    reducing over the horizon), we take the Euclidean **closest** basin center
+    (argmin over ``basin_points``).  Distance and sigmoid use **that** basin's
+    ``attraction_radius`` when set.  Different timesteps may attach to different
+    basins when multiple modes exist.
 
     reward = r_pos * r_traj * drift_factor
 
@@ -141,7 +146,9 @@ class NeutralBasinReward(BaseReward):
     exp(-drift_penalty * max(0, d_traj - d_current)).
     Approaching or staying incurs no penalty.
 
-    basin_points: list of {"position": [x,y,z]}.
+    basin_points: list of {"position": [x,y,z], optional "attraction_radius": float}.
+        Any basin omitting attraction_radius uses the top-level attraction_radius
+        argument as default.
     """
 
     def __init__(
@@ -158,35 +165,71 @@ class NeutralBasinReward(BaseReward):
         if not basin_points:
             raise ValueError("basin_points must be a non-empty list")
         self.reward_epsilon = reward_epsilon
-        self.midpoint, self.steepness = _parse_sigmoid_params(
-            attraction_radius, steepness, reward_epsilon)
+        self.steepness = steepness
         self.drift_penalty = drift_penalty
         self.dim_slice = slice(*dims)
         self.reduction = trajectory_reduction
         self._basin_pos = jnp.array([bp["position"] for bp in basin_points], dtype=jnp.float32)
+        radii = [
+            float(bp.get("attraction_radius", attraction_radius)) for bp in basin_points
+        ]
+        self._basin_midpoints = jnp.array(
+            [_parse_sigmoid_params(r, steepness, reward_epsilon)[0] for r in radii],
+            dtype=jnp.float32,
+        )
 
-    def _min_basin_dist(self, points: jnp.ndarray) -> jnp.ndarray:
-        """Min position distance from each point to any basin. points: (..., 3) -> (...)."""
+    def _nearest_basin_dist_and_idx(self, points: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+        """Closest basin per row: L2 distance to argmin center and basin index.
+
+        points: (..., 3); each row picks the basin with minimum distance.
+        """
         shape = points.shape[:-1]
         flat = points.reshape(-1, points.shape[-1])  # (N, 3)
         d_pos = jnp.linalg.norm(flat[:, None, :] - self._basin_pos[None, :, :], axis=-1)  # (N, M)
-        return d_pos.min(axis=-1).reshape(shape)
+        j = jnp.argmin(d_pos, axis=-1)
+        d = jnp.min(d_pos, axis=-1)
+        return d.reshape(shape), j.reshape(shape)
+
+    def _sigmoid_pair(self, dist: jnp.ndarray, midpoint: jnp.ndarray) -> jnp.ndarray:
+        eps = self.reward_epsilon
+        r = 1.0 / (1.0 + jnp.exp(self.steepness * (dist - midpoint)))
+        return jnp.where(r < eps, 0.0, r)
 
     def __call__(self, x0_hat: jnp.ndarray, current_state: jnp.ndarray) -> jnp.ndarray:
-        eps = self.reward_epsilon
-        if self.reduction == "endpoint":
-            dist = self._min_basin_dist(x0_hat[:, -1, self.dim_slice])
-        else:
-            per_step = self._min_basin_dist(x0_hat[:, :, self.dim_slice])  # (k, H)
-            dist = per_step.max(axis=-1) if self.reduction == "max" else per_step.mean(axis=-1)
-        r_traj = _sigmoid_reward(dist, self.steepness, self.midpoint, eps)
+        # r_pos: closest basin to current EE.
+        dist_cur, j_cur = self._nearest_basin_dist_and_idx(
+            current_state[self.dim_slice][None])  # (1,), (1,)
+        mid_cur = self._basin_midpoints[j_cur]
+        r_pos = self._sigmoid_pair(dist_cur, mid_cur)
 
-        dist_cur = self._min_basin_dist(current_state[self.dim_slice][None])  # (1,)
-        r_pos = _sigmoid_reward(dist_cur, self.steepness, self.midpoint, eps)  # (1,)
+        if self.reduction == "endpoint":
+            # Each particle: closest basin to predicted endpoint.
+            d_traj, j_traj = self._nearest_basin_dist_and_idx(x0_hat[:, -1, self.dim_slice])
+            mid_traj = self._basin_midpoints[j_traj]
+            r_traj = self._sigmoid_pair(d_traj, mid_traj)
+            dist_for_drift = d_traj
+        else:
+            # Each (particle, time): closest basin at that waypoint.
+            d_step, j_step = self._nearest_basin_dist_and_idx(
+                x0_hat[:, :, self.dim_slice])  # (k, H), (k, H)
+            if self.reduction == "max":
+                dist_for_drift = d_step.max(axis=-1)
+                h_star = jnp.argmax(d_step, axis=-1)
+                k = d_step.shape[0]
+                row = jnp.arange(k)
+                j_star = j_step[row, h_star]
+                mid_star = self._basin_midpoints[j_star]
+                r_traj = self._sigmoid_pair(dist_for_drift, mid_star)
+            else:
+                dist_for_drift = d_step.mean(axis=-1)
+                mid_step = self._basin_midpoints[j_step]
+                r_step = self._sigmoid_pair(d_step, mid_step)
+                r_traj = r_step.mean(axis=-1)
+
         reward = r_pos * r_traj
 
         if self.drift_penalty > 0:
-            drift = jnp.maximum(0.0, dist - dist_cur.squeeze())
+            drift = jnp.maximum(0.0, dist_for_drift - dist_cur.squeeze())
             reward = reward * jnp.exp(-self.drift_penalty * drift)
 
         return reward

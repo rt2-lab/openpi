@@ -21,12 +21,31 @@ Usage:
 import glob
 import os
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 
 import cv2
 import h5py
 import numpy as np
 from lerobot.common.datasets.lerobot_dataset import HF_LEROBOT_HOME, LeRobotDataset
 import tyro
+
+
+def _decode_images(
+    args: tuple[bytes, bytes, int, int],
+) -> tuple[np.ndarray, np.ndarray]:
+    """Decode + resize a single frame's JPEG pair. cv2 funcs release the GIL."""
+    gripper_jpeg, mount_jpeg, w, h = args
+    size = (w, h)
+
+    gripper_img = cv2.imdecode(np.frombuffer(gripper_jpeg, np.uint8), cv2.IMREAD_COLOR)
+    gripper_img = cv2.cvtColor(gripper_img, cv2.COLOR_BGR2RGB)
+    gripper_img = cv2.resize(gripper_img, size)
+
+    mount_img = cv2.imdecode(np.frombuffer(mount_jpeg, np.uint8), cv2.IMREAD_COLOR)
+    mount_img = cv2.cvtColor(mount_img, cv2.COLOR_BGR2RGB)
+    mount_img = cv2.resize(mount_img, size)
+
+    return gripper_img, mount_img
 
 
 def main(
@@ -37,6 +56,10 @@ def main(
     image_size: tuple[int, int] = (224, 224),
     default_task: str = "<control_mode> end effector <control_mode> perform the collaborative task",
     push_to_hub: bool = False,
+    num_workers: int = 4,
+    image_writer_threads: int = 10,
+    image_writer_processes: int = 0,
+    write_drain_interval: int = 64,
 ):
     """
     Args:
@@ -47,6 +70,10 @@ def main(
         image_size: (width, height) to resize images to.
         default_task: Language instruction to attach to every episode.
         push_to_hub: Whether to push the dataset to HuggingFace Hub.
+        num_workers: Threads for JPEG decode (cv2 releases the GIL; no IPC overhead).
+        image_writer_threads / image_writer_processes: LeRobot's async image writer pool. Processes=0
+            uses threads only (PIL.save releases the GIL; avoids pickle copy overhead).
+        write_drain_interval: Drain LeRobot's write queue every N frames to bound memory.
     """
     output_path = HF_LEROBOT_HOME / repo_name
     if output_path.exists():
@@ -84,15 +111,18 @@ def main(
                 "names": ["actions"],
             },
         },
-        image_writer_threads=10,
-        image_writer_processes=5,
+        image_writer_threads=image_writer_threads,
+        image_writer_processes=image_writer_processes,
     )
 
-    for ep_path in episode_paths:
-        print(f"Processing {ep_path}...")
+    pool = ThreadPoolExecutor(max_workers=num_workers) if num_workers > 1 else None
+
+    for ep_idx, ep_path in enumerate(episode_paths):
+        print(f"[{ep_idx + 1}/{len(episode_paths)}] {ep_path}")
+
         with h5py.File(ep_path, "r") as f:
             ep_len = len(f["timestamps"])
-            frame_indices = list(range(0, ep_len, downsample_factor))
+            indices = list(range(0, ep_len, downsample_factor))
 
             robot_pose = np.array(f["robot_current_pose"][:], dtype=np.float32)
             desired_pose = np.array(f["robot_desired_pose"][:], dtype=np.float32)
@@ -104,35 +134,40 @@ def main(
             if gripper_cmd.ndim == 1:
                 gripper_cmd = gripper_cmd[:, np.newaxis]
 
-            # State = current pose (7D) + gripper actual (1D) = 8D
             states = np.concatenate([robot_pose, gripper_act], axis=1)
-            # Action = desired pose (7D) + gripper cmd (1D) = 8D
             actions = np.concatenate([desired_pose, gripper_cmd], axis=1)
 
-            for frame_idx in frame_indices:
-                # Decode gripper image
-                gripper_jpeg = np.array(f["gripper_image_rgb_compressed"][frame_idx])
-                gripper_img = cv2.imdecode(gripper_jpeg, cv2.IMREAD_COLOR)
-                gripper_img = cv2.cvtColor(gripper_img, cv2.COLOR_BGR2RGB)
-                gripper_img = cv2.resize(gripper_img, image_size)
-
-                # Decode mount image
-                mount_jpeg = np.array(f["mount_image_rgb_compressed"][frame_idx])
-                mount_img = cv2.imdecode(mount_jpeg, cv2.IMREAD_COLOR)
-                mount_img = cv2.cvtColor(mount_img, cv2.COLOR_BGR2RGB)
-                mount_img = cv2.resize(mount_img, image_size)
-
-                dataset.add_frame(
-                    {
-                        "mount_image": mount_img,
-                        "gripper_image": gripper_img,
-                        "state": states[frame_idx],
-                        "actions": actions[frame_idx],
-                        "task": default_task,
-                    }
+            decode_args = [
+                (
+                    bytes(f["gripper_image_rgb_compressed"][i]),
+                    bytes(f["mount_image_rgb_compressed"][i]),
+                    image_size[0],
+                    image_size[1],
                 )
+                for i in indices
+            ]
 
+        if pool is not None:
+            decoded = pool.map(_decode_images, decode_args, chunksize=8)
+        else:
+            decoded = map(_decode_images, decode_args)
+
+        for j, (gripper_img, mount_img) in enumerate(decoded):
+            dataset.add_frame(
+                {
+                    "mount_image": mount_img,
+                    "gripper_image": gripper_img,
+                    "state": states[indices[j]],
+                    "actions": actions[indices[j]],
+                    "task": default_task,
+                }
+            )
+            if (j + 1) % write_drain_interval == 0:
+                dataset._wait_image_writer()
         dataset.save_episode()
+
+    if pool is not None:
+        pool.shutdown()
 
     print(f"Dataset saved to {output_path}")
     print(f"Total episodes: {len(episode_paths)}")

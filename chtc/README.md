@@ -28,7 +28,7 @@ Train pi0/pi0.5 models on [CHTC GPU Lab](https://chtc.cs.wisc.edu/uw-research-co
 ```bash
 uv run examples/collab/convert_collab_data_to_lerobot.py \
     --db_dir /path/to/episodes \
-    --repo_name local/collab \
+    --repo_name local/{YOUR DATASET NAME}\
     --fps 10 --downsample_factor 2
 ```
 
@@ -36,8 +36,8 @@ uv run examples/collab/convert_collab_data_to_lerobot.py \
 
 ```bash
 docker build -t openpi_train -f chtc/train.Dockerfile .
-docker tag openpi_train lexu27/openpi_train:waiting-derisk
-docker push lexu27/openpi_train:waiting-derisk
+docker tag openpi_train lexu27/openpi_train:paper-ready-handover
+docker push lexu27/openpi_train:paper-ready-handover
 ```
 
 ### 3. Stage data to CHTC group staging
