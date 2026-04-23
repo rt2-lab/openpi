@@ -151,28 +151,25 @@ def _build_fused_fn(model, fk_config, jax_output_params, num_steps):
                 phys = _to_physical_jax(x_t, raw_state_j, jax_output_params)
                 cur = reward_fn(phys, raw_state_j)
 
-                def _with_prev(a):
-                    x_t, cur, prev, rrng = a
-                    w = difference_potential(cur, prev, lambda_)
-                    if adaptive:
-                        ess = effective_sample_size(w)
-                        def _do(b):
-                            idx = multinomial_resample(b[2], b[1])
-                            return b[0][idx], b[3][idx]
-                        def _skip(b):
-                            return b[0], b[3]
-                        return jax.lax.cond(
-                            ess <= ess_threshold * k, _do, _skip,
-                            (x_t, w, rrng, cur))
+                # has_prev=False zeros prev_rew, giving absolute potential
+                # exp(λ R_cur) at the first checkpoint. Subsequent checkpoints
+                # use the standard difference exp(λ(R_cur - R_prev)).
+                # Product telescopes exactly to exp(λ R_N).
+                w = difference_potential(cur, prev_rew * has_prev, lambda_)
+                if adaptive:
+                    ess = effective_sample_size(w)
+                    def _do(b):
+                        idx = multinomial_resample(b[2], b[1])
+                        return b[0][idx], b[3][idx]
+                    def _skip(b):
+                        return b[0], b[3]
+                    x_t, cur = jax.lax.cond(
+                        ess <= ess_threshold * k, _do, _skip,
+                        (x_t, w, rrng, cur))
+                else:
                     idx = multinomial_resample(rrng, w)
-                    return x_t[idx], cur[idx]
+                    x_t, cur = x_t[idx], cur[idx]
 
-                def _first_checkpoint(a):
-                    return a[0], a[1]   # no resampling yet
-
-                x_t, cur = jax.lax.cond(
-                    has_prev, _with_prev, _first_checkpoint,
-                    (x_t, cur, prev_rew, rrng))
                 return x_t, cur, jnp.bool_(True)
 
             def _no_resample_branch(args):

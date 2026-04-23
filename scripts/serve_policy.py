@@ -1,8 +1,11 @@
 import dataclasses
 import enum
 import logging
+import os
+import signal
 import socket
 
+import jax
 import numpy as np
 import tyro
 
@@ -115,7 +118,39 @@ class PromptOverridePolicy(_policy.BasePolicy):
         return self._policy.metadata
 
 
+_TRACE_DIR = os.environ.get("JAX_PROFILE_DIR", "/tmp/jax-profile")
+_profiling_active = False
+
+
+def _start_profile(signum, frame):
+    global _profiling_active
+    if _profiling_active:
+        logging.warning("Profile already active, ignoring SIGUSR1")
+        return
+    logging.info("SIGUSR1 received — starting JAX trace to %s", _TRACE_DIR)
+    jax.profiler.start_trace(_TRACE_DIR)
+    _profiling_active = True
+
+
+def _stop_profile(signum, frame):
+    global _profiling_active
+    if not _profiling_active:
+        logging.warning("No active profile, ignoring SIGUSR2")
+        return
+    jax.profiler.stop_trace()
+    _profiling_active = False
+    logging.info("SIGUSR2 received — JAX trace saved to %s", _TRACE_DIR)
+
+
 def main(args: Args) -> None:
+    signal.signal(signal.SIGUSR1, _start_profile)
+    signal.signal(signal.SIGUSR2, _stop_profile)
+    logging.info(
+        "JAX profiling ready  (PID %d).  kill -USR1 %d  to start,  kill -USR2 %d  to stop.  "
+        "Traces go to %s  (override with JAX_PROFILE_DIR env var).",
+        os.getpid(), os.getpid(), os.getpid(), _TRACE_DIR,
+    )
+
     policy = create_policy(args)
     policy_metadata = policy.metadata
 
