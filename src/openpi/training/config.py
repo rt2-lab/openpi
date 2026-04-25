@@ -1156,7 +1156,7 @@ _CONFIGS = [
         save_interval=5000,
     ),
     #
-    # Mixed derisk fine-tuning configs.
+    # Paper-ready and mixed-derisk fine-tuning configs.
     #
     TrainConfig(
         name="pi05_paper_ready_handover",
@@ -1167,6 +1167,36 @@ _CONFIGS = [
         model=pi0_config.Pi0Config(pi05=True, action_dim=32, action_horizon=16),
         data=LeRobotCollabDataConfig(
             repo_id="local/paper-ready-handover",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=25000,
+        save_interval=25000,
+    ),
+    TrainConfig(
+        name="pi05_paper_ready_mixed",
+        project_name="Paper Ready Mixed",
+        wandb_entity="RT2-DIFFUSE",
+        wandb_group="OpenPI (Paper Ready Mixed)",
+        wandb_tags=("openpi", "paper-ready-mixed", "pi05"),
+        model=pi0_config.Pi0Config(pi05=True, action_dim=32, action_horizon=16),
+        data=LeRobotCollabDataConfig(
+            repo_id="local/paper_ready_mixed",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=25000,
+        save_interval=25000,
+    ),
+    TrainConfig(
+        name="pi05_paper_ready_abstract",
+        project_name="Paper Ready Abstract",
+        wandb_entity="RT2-DIFFUSE",
+        wandb_group="OpenPI (Paper Ready Abstract)",
+        wandb_tags=("openpi", "paper-ready-abstract", "pi05"),
+        model=pi0_config.Pi0Config(pi05=True, action_dim=32, action_horizon=16),
+        data=LeRobotCollabDataConfig(
+            repo_id="local/paper_ready_abstract",
             base_config=DataConfig(prompt_from_task=True),
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),

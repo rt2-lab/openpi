@@ -1,0 +1,57 @@
+# ==============================================================================
+# HTCondor submit file — pi05_paper_ready_mixed on CHTC GPU Lab
+# ==============================================================================
+#
+# Usage:
+#   1. Stage dataset:  ./chtc/stage_data.sh lpxu paper_ready_mixed
+#   2. Push Docker:    docker push lexu27/openpi_train:paper-ready
+#   3. Submit:         condor_submit chtc/train_paper_ready_mixed.sub
+#
+# ==============================================================================
+
+universe                = container
+container_image         = docker://lexu27/openpi_train:paper-ready
+
+netid                   = lpxu
+
+executable              = chtc/run_train.sh
+
+config_name             = pi05_paper_ready_mixed
+exp_name                = pi05_$(Cluster)
+arguments               = $(config_name) $(exp_name) $(netid)
+
+should_transfer_files   = YES
+when_to_transfer_output = ON_EXIT_OR_EVICT
+
+getenv                  = True
+
+transfer_input_files    = file:///staging/groups/hagenow_group/paper_ready_mixed_dataset.tar.gz
+
+transfer_output_files   = checkpoint_bundle.tar
+transfer_output_remaps  = "checkpoint_bundle.tar = file:///staging/groups/hagenow_group/openpi/$(config_name).tar"
+
+log                     = logs/train_$(Cluster).log
+output                  = logs/train_$(Cluster).out
+error                   = logs/train_$(Cluster).err
+
+request_gpus            = 1
+request_cpus            = 8
+request_memory          = 200GB
+request_disk            = 1000GB
+
+gpus_minimum_capability = 9.0
+gpus_minimum_memory     = 80000
+
++WantGPULab             = true
++GPUJobLength           = "long"
+
++is_resumable           = false
+
+Requirements            = (Target.HasCHTCStaging == true)
+
+environment             = "HOME=$_CONDOR_SCRATCH_DIR XDG_CACHE_HOME=$_CONDOR_SCRATCH_DIR/.cache UV_CACHE_DIR=$_CONDOR_SCRATCH_DIR/.cache/uv XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 HF_HOME=$_CONDOR_SCRATCH_DIR/.cache/hf OPENPI_DATA_HOME=$_CONDOR_SCRATCH_DIR/.cache/openpi WANDB_DIR=$_CONDOR_SCRATCH_DIR/.cache/wandb"
+
+stream_output           = True
+stream_error            = True
+
+queue 1
