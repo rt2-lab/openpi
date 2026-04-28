@@ -36,8 +36,8 @@ uv run examples/collab/convert_collab_data_to_lerobot.py \
 
 ```bash
 docker build -t openpi_train -f chtc/train.Dockerfile .
-docker tag openpi_train lexu27/openpi_train:paper-ready-tasks-p1
-docker push lexu27/openpi_train:paper-ready-tasks-p1
+docker tag openpi_train lexu27/openpi_train:paper-ready-handover
+docker push lexu27/openpi_train:paper-ready-handover
 
 ```
 

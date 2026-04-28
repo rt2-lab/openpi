@@ -54,7 +54,6 @@ class Config:
 
 Variant = Literal["dummy", "gemma_300m", "gemma_300m_lora", "gemma_2b", "gemma_2b_lora"]
 
-
 def get_config(variant: Variant) -> Config:
     """Returns config for specified gemma variant."""
     if variant == "dummy":

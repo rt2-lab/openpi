@@ -1163,10 +1163,10 @@ _CONFIGS = [
         project_name="Paper Ready Handover",
         wandb_entity="RT2-DIFFUSE",
         wandb_group="OpenPI (Paper Ready Handover)",
-        wandb_tags=("openpi", "paper-ready-handover", "pi05"),
+        wandb_tags=("openpi", "paper_ready_handover", "pi05"),
         model=pi0_config.Pi0Config(pi05=True, action_dim=32, action_horizon=16),
         data=LeRobotCollabDataConfig(
-            repo_id="local/paper-ready-handover",
+            repo_id="local/paper_ready_handover",
             base_config=DataConfig(prompt_from_task=True),
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
