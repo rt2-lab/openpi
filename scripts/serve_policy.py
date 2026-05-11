@@ -57,6 +57,9 @@ class Args:
     # Record the policy's behavior for debugging.
     record: bool = False
 
+    # Precompute adaRMS modulations for pi0.5 (faster inference, same output).
+    tabulate_adarms: bool = True 
+
     # Specifies how to load the policy. If not provided, the default policy for the environment will be used.
     policy: Checkpoint | Default = dataclasses.field(default_factory=Default)
 
@@ -82,11 +85,14 @@ DEFAULT_CHECKPOINT: dict[EnvMode, Checkpoint] = {
 }
 
 
-def create_default_policy(env: EnvMode, *, default_prompt: str | None = None) -> _policy.Policy:
+def create_default_policy(
+    env: EnvMode, *, default_prompt: str | None = None, tabulate_adarms: bool = True
+) -> _policy.Policy:
     """Create a default policy for the given environment."""
     if checkpoint := DEFAULT_CHECKPOINT.get(env):
         return _policy_config.create_trained_policy(
-            _config.get_config(checkpoint.config), checkpoint.dir, default_prompt=default_prompt
+            _config.get_config(checkpoint.config), checkpoint.dir,
+            default_prompt=default_prompt, tabulate_adarms=tabulate_adarms,
         )
     raise ValueError(f"Unsupported environment mode: {env}")
 
@@ -96,10 +102,13 @@ def create_policy(args: Args) -> _policy.Policy:
     match args.policy:
         case Checkpoint():
             return _policy_config.create_trained_policy(
-                _config.get_config(args.policy.config), args.policy.dir, default_prompt=args.default_prompt
+                _config.get_config(args.policy.config), args.policy.dir,
+                default_prompt=args.default_prompt, tabulate_adarms=args.tabulate_adarms,
             )
         case Default():
-            return create_default_policy(args.env, default_prompt=args.default_prompt)
+            return create_default_policy(
+                args.env, default_prompt=args.default_prompt, tabulate_adarms=args.tabulate_adarms,
+            )
 
 
 class PromptOverridePolicy(_policy.BasePolicy):

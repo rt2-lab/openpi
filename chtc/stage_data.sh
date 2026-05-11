@@ -19,7 +19,7 @@ if [ ! -d "$DATASET_DIR" ]; then
 fi
 
 echo "Creating tarball from: $DATASET_DIR"
-tar -czf "$TARBALL" -C "$LEROBOT_HOME" "$REPO_ID"
+tar -chzf "$TARBALL" -C "$LEROBOT_HOME" "$REPO_ID"
 echo "Tarball size: $(du -sh "$TARBALL" | cut -f1)"
 
 echo "Uploading to ${TRANSFER_HOST}:${GROUP_STAGING_DIR}/${STAGED_TARBALL_NAME}"

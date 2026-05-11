@@ -112,21 +112,26 @@ def get_config(variant: Variant) -> Config:
 class RMSNorm(nn.Module):
     @nn.compact
     def __call__(self, x, cond):
-        dtype = x.dtype  # original dtype, could be half-precision
-        var = jnp.mean(jnp.square(x.astype(jnp.float32)), axis=-1, keepdims=True)  # compute variance in float32
-        normed_inputs = jnp.asarray(x * jnp.reciprocal(jnp.sqrt(var + 1e-06)))  # compute normalization in float32
-        if cond is None:
-            # regular RMSNorm
-            scale = self.param("scale", nn.initializers.zeros_init(), (x.shape[-1]))
-            normed_inputs = normed_inputs * (
-                1 + scale
-            )  # scale by learned parameter in float32 (matches Flax implementation)
-            return normed_inputs.astype(dtype), None  # return in original dtype
+        dtype = x.dtype
+        var = jnp.mean(jnp.square(x.astype(jnp.float32)), axis=-1, keepdims=True)
+        normed_inputs = jnp.asarray(x * jnp.reciprocal(jnp.sqrt(var + 1e-06)))
 
-        # adaptive RMSNorm
+        if cond is None or (hasattr(cond, "ndim") and cond.ndim == 0):
+            # regular RMSNorm (non-adaptive)
+            scale = self.param("scale", nn.initializers.zeros_init(), (x.shape[-1]))
+            normed_inputs = normed_inputs * (1 + scale)
+            return normed_inputs.astype(dtype), None
+
+        if isinstance(cond, tuple):
+            # tabulated adaptive RMSNorm — Dense already precomputed
+            scale, shift, gate = cond
+            normed_inputs = normed_inputs * (1 + scale) + shift
+            return normed_inputs.astype(dtype), gate
+
+        # adaptive RMSNorm (training path)
         modulation = nn.Dense(x.shape[-1] * 3, kernel_init=nn.initializers.zeros, dtype=dtype)(cond)
         scale, shift, gate = jnp.split(modulation[:, None, :], 3, axis=-1)
-        normed_inputs = normed_inputs * (1 + scale) + shift  # scale and shift in float32
+        normed_inputs = normed_inputs * (1 + scale) + shift
         return normed_inputs.astype(dtype), gate
 
 
@@ -285,11 +290,24 @@ class Block(nn.Module):
 
         attn = Attention(configs=self.configs, name="attn")
 
+        # Split per-expert cond into attn-norm / ffw-norm portions.
+        # Tabulated cond is a 6-tuple (s,h,g for attn, s,h,g for ffw); training cond is a tensor.
+        attn_conds = []
+        ffw_conds = []
+        for i in range(len(self.configs)):
+            c = adarms_cond[i]
+            if isinstance(c, tuple):
+                attn_conds.append(c[:3])
+                ffw_conds.append(c[3:])
+            else:
+                attn_conds.append(c)
+                ffw_conds.append(c)
+
         pre_attn = []
         gates = []
         for i, x in enumerate(xs):
             if x is not None:
-                x, gate = RMSNorm(name=_name("pre_attention_norm", i))(x, adarms_cond[i])  # noqa: PLW2901
+                x, gate = RMSNorm(name=_name("pre_attention_norm", i))(x, attn_conds[i])  # noqa: PLW2901
             pre_attn.append(x)
             gates.append(gate if x is not None else None)
 
@@ -304,7 +322,7 @@ class Block(nn.Module):
         gates = []
         for i, (x, config) in enumerate(zip(xs, self.configs, strict=True)):
             if x is not None:
-                x, gate = RMSNorm(name=_name("pre_ffw_norm", i))(x, adarms_cond[i])  # noqa: PLW2901
+                x, gate = RMSNorm(name=_name("pre_ffw_norm", i))(x, ffw_conds[i])  # noqa: PLW2901
                 x = lora.FeedForward(  # noqa: PLW2901
                     features=config.width,
                     hidden_dim=config.mlp_dim,
@@ -359,9 +377,9 @@ class Module(nn.Module):
                 0,
                 nn.broadcast,
                 nn.broadcast,
+                0,
                 nn.broadcast,
-                nn.broadcast,
-            ),  # 0=kv_cache, 1=positions, 2=mask, 3=adarms_cond, 4=deterministic
+            ),  # 0=kv_cache, 1=positions, 2=mask, 3=adarms_cond (scanned), 4=deterministic
             length=self.configs[0].depth,
         )(
             configs=self.configs,
@@ -374,14 +392,12 @@ class Module(nn.Module):
     def embed(self, tokens: at.Int[at.Array, "b t"]) -> at.Float[at.Array, "b t d"]:
         return self.embedder.encode(tokens).astype(self.embed_dtype)
 
-    @at.typecheck
     def __call__(
         self,
-        # list of token arrays, one for each expert, or None if that expert should not be run
         embedded: Sequence[at.Float[at.Array, "b _t _d"] | None],
         positions: at.Int[at.Array, "b t"],
         mask: at.Bool[at.Array, "b t s"],
-        adarms_cond: Sequence[at.Float[at.Array, "b _d"] | None] | None = None,
+        adarms_cond=None,
         *,
         kv_cache: KVCache | None = None,
         deterministic: bool = True,
@@ -391,12 +407,32 @@ class Module(nn.Module):
         if adarms_cond is None:
             adarms_cond = [None] * len(self.configs)
 
-        embedded, kv_cache = self.layers(embedded, kv_cache, positions, mask, adarms_cond, deterministic)
+        depth = self.configs[0].depth
+
+        # Prep adarms_cond for scan (each leaf needs a leading depth axis).
+        # Training tensors get repeated; None becomes a dummy scalar per layer;
+        # tabulated tuples already carry the depth axis.
+        scan_cond = []
+        final_cond = []
+        for c in adarms_cond:
+            if c is None:
+                scan_cond.append(jnp.zeros((depth,)))
+                final_cond.append(None)
+            elif isinstance(c, dict):
+                # Tabulated: {"blocks": 6-tuple w/ depth axis, "final": 3-tuple}
+                scan_cond.append(c["blocks"])
+                final_cond.append(c["final"])
+            else:
+                # Training: [B, D] → [depth, B, D]
+                scan_cond.append(jnp.broadcast_to(c[None], (depth, *c.shape)))
+                final_cond.append(c)
+
+        embedded, kv_cache = self.layers(embedded, kv_cache, positions, mask, scan_cond, deterministic)
 
         assert all(e.dtype == jnp.dtype(self.embed_dtype) for e in embedded if e is not None)
 
         return [
-            f(e, a)[0] if e is not None else e for f, e, a in zip(self.final_norms, embedded, adarms_cond, strict=True)
+            f(e, a)[0] if e is not None else e for f, e, a in zip(self.final_norms, embedded, final_cond, strict=True)
         ], kv_cache
 
     def init(self, use_adarms: Sequence[bool]):

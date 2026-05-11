@@ -21,6 +21,7 @@ from openpi.fk_steering.potentials import (
     multinomial_resample,
 )
 from openpi.fk_steering.rewards import build_reward
+from openpi.models.adarms_table import tabulated_adarms_cond
 from openpi.models.pi0 import make_attn_mask
 
 logger = logging.getLogger(__name__)
@@ -113,18 +114,22 @@ def _build_fused_fn(model, fk_config, jax_output_params, num_steps):
     k             = fk_config["num_particles"]
     dt            = -1.0 / num_steps
     ah            = model.action_horizon
+    use_table     = model.adarms_table is not None
 
     def _raw(state, x_t, rng, raw_state_j,
              obs_k, pfx_mask_k, kv_cache_k, resample_mask_j):
         module = nnx.merge(graphdef, state)
 
         def scan_body(carry, should_resample):
-            x_t, time, prev_rew, rng, has_prev = carry
+            x_t, time, prev_rew, rng, has_prev, step_idx = carry
 
             # ── one denoising step (action expert) ──
             suf_tok, suf_mask, suf_ar, adarms = module.embed_suffix(
                 obs_k, x_t, jnp.broadcast_to(time, (k,)),
             )
+            if use_table:
+                adarms = tabulated_adarms_cond(module.adarms_table, step_idx)
+
             suf_attn = make_attn_mask(suf_mask, suf_ar)
             pfx_attn = einops.repeat(pfx_mask_k, "b p -> b s p",
                                      s=suf_tok.shape[1])
@@ -180,11 +185,11 @@ def _build_fused_fn(model, fk_config, jax_output_params, num_steps):
                 _resample_branch, _no_resample_branch,
                 (x_t, prev_rew, has_prev, resample_rng))
 
-            return (x_t, time, prev_rew, rng, has_prev), None
+            return (x_t, time, prev_rew, rng, has_prev, step_idx + 1), None
 
         init = (x_t, jnp.float32(1.0), jnp.zeros(k, dtype=jnp.float32),
-                rng, jnp.bool_(False))
-        (x_final, _, _, _, _), _ = jax.lax.scan(
+                rng, jnp.bool_(False), jnp.int32(0))
+        (x_final, _, _, _, _, _), _ = jax.lax.scan(
             scan_body, init, resample_mask_j)
         return _to_physical_jax(x_final, raw_state_j, jax_output_params)
 

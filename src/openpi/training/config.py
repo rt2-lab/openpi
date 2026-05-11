@@ -1204,6 +1204,21 @@ _CONFIGS = [
         save_interval=25000,
     ),
     TrainConfig(
+        name="pi05_paper_ready_abstract_long",
+        project_name="Paper Ready Abstract Long",
+        wandb_entity="RT2-DIFFUSE",
+        wandb_group="OpenPI (Paper Ready Abstract Long)",
+        wandb_tags=("openpi", "paper-ready-abstract-long", "pi05"),
+        model=pi0_config.Pi0Config(pi05=True, action_dim=32, action_horizon=64),
+        data=LeRobotCollabDataConfig(
+            repo_id="local/paper_ready_abstract",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=25000,
+        save_interval=25000,
+    ),
+    TrainConfig(
         name="pi05_mixed_derisk",
         project_name="Mixed Derisk",
         wandb_entity="RT2-DIFFUSE",

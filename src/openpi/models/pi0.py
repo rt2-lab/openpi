@@ -9,6 +9,7 @@ from typing_extensions import override
 
 from openpi.models import model as _model
 from openpi.models import pi0_config
+from openpi.models.adarms_table import build_adarms_table, tabulated_adarms_cond
 import openpi.models.gemma as _gemma
 import openpi.models.siglip as _siglip
 from openpi.shared import array_typing as at
@@ -99,8 +100,30 @@ class Pi0(_model.BaseModel):
             self.action_time_mlp_out = nnx.Linear(action_expert_config.width, action_expert_config.width, rngs=rngs)
         self.action_out_proj = nnx.Linear(action_expert_config.width, config.action_dim, rngs=rngs)
 
+        # Precomputed adaRMS table (set via tabulate_adarms after weight loading).
+        # Stored as nnx.Variables for NNX graph compatibility.
+        self._adarms_table_blocks: tuple[nnx.Variable, ...] | None = None
+        self._adarms_table_final: tuple[nnx.Variable, ...] | None = None
+
         # This attribute gets automatically set by model.train() and model.eval().
         self.deterministic = True
+
+    def tabulate_adarms(self, num_steps: int = 10):
+        """Precompute adaRMS modulation table for inference. Call after loading weights."""
+        if not self.pi05:
+            return
+        table = build_adarms_table(self, num_steps)
+        self._adarms_table_blocks = tuple(nnx.Variable(b) for b in table["blocks"])
+        self._adarms_table_final = tuple(nnx.Variable(f) for f in table["final"])
+
+    @property
+    def adarms_table(self):
+        if self._adarms_table_blocks is None:
+            return None
+        return {
+            "blocks": tuple(b.value for b in self._adarms_table_blocks),
+            "final": tuple(f.value for f in self._adarms_table_final),
+        }
 
     @at.typecheck
     def embed_prefix(
@@ -236,26 +259,25 @@ class Pi0(_model.BaseModel):
         positions = jnp.cumsum(prefix_mask, axis=1) - 1
         _, kv_cache = self.PaliGemma.llm([prefix_tokens, None], mask=prefix_attn_mask, positions=positions)
 
+        table = self.adarms_table
+        use_table = table is not None
+
         def step(i, carry):
             x_t, time = carry
             suffix_tokens, suffix_mask, suffix_ar_mask, adarms_cond = self.embed_suffix(
                 observation, x_t, jnp.broadcast_to(time, batch_size)
             )
-            # `suffix_attn_mask` is shape (b, suffix_len, suffix_len) indicating how the suffix tokens can attend to each
-            # other
+            if use_table:
+                adarms_cond = tabulated_adarms_cond(table, i)
+
             suffix_attn_mask = make_attn_mask(suffix_mask, suffix_ar_mask)
-            # `prefix_attn_mask` is shape (b, suffix_len, prefix_len) indicating how the suffix tokens can attend to the
-            # prefix tokens
             prefix_attn_mask = einops.repeat(prefix_mask, "b p -> b s p", s=suffix_tokens.shape[1])
-            # `combined_mask` is shape (b, suffix_len, prefix_len + suffix_len) indicating how the suffix tokens (which
-            # generate the queries) can attend to the full prefix + suffix sequence (which generates the keys and values)
             full_attn_mask = jnp.concatenate([prefix_attn_mask, suffix_attn_mask], axis=-1)
             assert full_attn_mask.shape == (
                 batch_size,
                 suffix_tokens.shape[1],
                 prefix_tokens.shape[1] + suffix_tokens.shape[1],
             )
-            # `positions` is shape (b, suffix_len) indicating the positions of the suffix tokens
             positions = jnp.sum(prefix_mask, axis=-1)[:, None] + jnp.cumsum(suffix_mask, axis=-1) - 1
 
             (prefix_out, suffix_out), _ = self.PaliGemma.llm(
@@ -338,11 +360,17 @@ class Pi0(_model.BaseModel):
         in segments between resampling points — each segment compiles to
         a single fused XLA fori_loop.
         """
+        table = self.adarms_table
+        use_table = table is not None
+
         def step(i, carry):
             x_t, time = carry
             suffix_tokens, suffix_mask, suffix_ar_mask, adarms_cond = self.embed_suffix(
                 observation, x_t, jnp.broadcast_to(time, batch_size)
             )
+            if use_table:
+                adarms_cond = tabulated_adarms_cond(table, i)
+
             suffix_attn_mask = make_attn_mask(suffix_mask, suffix_ar_mask)
             prefix_attn_mask_step = einops.repeat(prefix_mask, "b p -> b s p", s=suffix_tokens.shape[1])
             full_attn_mask = jnp.concatenate([prefix_attn_mask_step, suffix_attn_mask], axis=-1)
