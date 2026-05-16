@@ -138,8 +138,17 @@ def create_torch_dataset(
         return FakeDataset(model_config, num_samples=1024)
 
     dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id)
+
+    episodes = None
+    if data_config.data_pct < 100:
+        total_episodes = dataset_meta.total_episodes
+        num_episodes = max(1, int(total_episodes * data_config.data_pct / 100))
+        episodes = list(range(num_episodes))
+        logging.info(f"data_pct={data_config.data_pct}% → using {num_episodes}/{total_episodes} episodes")
+
     dataset = lerobot_dataset.LeRobotDataset(
         data_config.repo_id,
+        episodes=episodes,
         delta_timestamps={
             key: [t / dataset_meta.fps for t in range(action_horizon)] for key in data_config.action_sequence_keys
         },

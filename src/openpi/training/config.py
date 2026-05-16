@@ -71,6 +71,8 @@ class DataConfig:
     asset_id: str | None = None
     # Contains precomputed normalization stats. If None, normalization will not be performed.
     norm_stats: dict[str, _transforms.NormStats] | None = None
+    # Percentage of episodes to use (1-100).
+    data_pct: int = 100
 
     # Used to adopt the inputs from a dataset specific format to a common format
     # which is expected by the data transforms.
@@ -173,6 +175,8 @@ class DataConfigFactory(abc.ABC):
     assets: AssetsConfig = dataclasses.field(default_factory=AssetsConfig)
     # Base config that will be updated by the factory.
     base_config: tyro.conf.Suppress[DataConfig | None] = None
+    # Percentage of episodes to use (1-100).
+    data_pct: int = 100
 
     @abc.abstractmethod
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
@@ -187,6 +191,7 @@ class DataConfigFactory(abc.ABC):
             asset_id=asset_id,
             norm_stats=self._load_norm_stats(epath.Path(self.assets.assets_dir or assets_dirs), asset_id),
             use_quantile_norm=model_config.model_type != ModelType.PI0,
+            data_pct=self.data_pct,
         )
 
     def _load_norm_stats(self, assets_dir: epath.Path, asset_id: str | None) -> dict[str, _transforms.NormStats] | None:

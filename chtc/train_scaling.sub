@@ -1,0 +1,72 @@
+# ==============================================================================
+# HTCondor submit file — pi0.5 data scaling experiment
+# Queues 10 jobs in parallel, each training on 10%, 20%, ..., 100% of data.
+# ==============================================================================
+#
+# Usage:
+#   1. Stage dataset:  ./chtc/stage_data.sh lpxu paper_ready_handover
+#   2. Push Docker:    docker push lexu27/openpi_train:paper-ready-handover
+#   3. Submit:         condor_submit chtc/train_scaling.sub
+#
+# Override config at submit time:
+#   condor_submit chtc/train_scaling.sub config_name=pi05_paper_ready_mixed
+#
+# ==============================================================================
+
+universe                = container
+container_image         = docker://lexu27/openpi_train:data-scale
+
+netid                   = lpxu
+
+executable              = chtc/run_train_scaling.sh
+
+config_name             = pi05_paper_ready_mixed
+exp_name                = pi05_scaling_pct$(data_pct)_$(Cluster)
+arguments               = $(config_name) $(exp_name) $(netid) $(data_pct)
+
+should_transfer_files   = YES
+when_to_transfer_output = ON_EXIT_OR_EVICT
+
+getenv                  = True
+
+transfer_input_files    = file:///staging/groups/hagenow_group/paper_ready_mixed_dataset.tar.gz
+
+transfer_output_files   = checkpoint_bundle.tar
+transfer_output_remaps  = "checkpoint_bundle.tar = file:///staging/groups/hagenow_group/openpi/scaling_$(config_name)_pct$(data_pct).tar"
+
+log                     = logs/scaling_pct$(data_pct)_$(Cluster).log
+output                  = logs/scaling_pct$(data_pct)_$(Cluster).out
+error                   = logs/scaling_pct$(data_pct)_$(Cluster).err
+
+request_gpus            = 1
+request_cpus            = 8
+request_memory          = 200GB
+request_disk            = 1000GB
+
+gpus_minimum_capability = 8.0
+gpus_minimum_memory     = 80000
+
++WantGPULab             = true
++GPUJobLength           = "long"
+
++is_resumable           = false
+
+Requirements            = (Target.HasCHTCStaging == true)
+
+environment             = "HOME=$_CONDOR_SCRATCH_DIR XDG_CACHE_HOME=$_CONDOR_SCRATCH_DIR/.cache UV_CACHE_DIR=$_CONDOR_SCRATCH_DIR/.cache/uv XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 HF_HOME=$_CONDOR_SCRATCH_DIR/.cache/hf OPENPI_DATA_HOME=$_CONDOR_SCRATCH_DIR/.cache/openpi WANDB_DIR=$_CONDOR_SCRATCH_DIR/.cache/wandb"
+
+stream_output           = True
+stream_error            = True
+
+queue data_pct from (
+    10
+    20
+    30
+    40
+    50
+    60
+    70
+    80
+    90
+    100
+)

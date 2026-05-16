@@ -126,13 +126,13 @@ class ConservativeHardReward(BaseReward):
 
 
 class NeutralBasinReward(BaseReward):
-    """Sigmoid reward using the **closest** basin (per 3D query), gated by the arm.
+    """Sigmoid reward anchored to the basin **closest to the robot's current EE**.
 
-    For each 3D position (current EE, trajectory endpoint, or each waypoint when
-    reducing over the horizon), we take the Euclidean **closest** basin center
-    (argmin over ``basin_points``).  Distance and sigmoid use **that** basin's
-    ``attraction_radius`` when set.  Different timesteps may attach to different
-    basins when multiple modes exist.
+    The basin nearest the current end-effector position determines the target
+    for *all* trajectory particles.  This prevents different particles from
+    latching onto different basins and pulling the robot in conflicting
+    directions.  As the robot moves between basins, ``j_cur`` naturally flips
+    and trajectories begin tracking the new basin.
 
     reward = r_pos * r_traj * drift_factor
 
@@ -190,41 +190,39 @@ class NeutralBasinReward(BaseReward):
         d = jnp.min(d_pos, axis=-1)
         return d.reshape(shape), j.reshape(shape)
 
+    def _dist_to_basin(self, points: jnp.ndarray, basin_idx: jnp.ndarray) -> jnp.ndarray:
+        """L2 distance from each point in (..., 3) to a single basin center.
+
+        basin_idx must be a scalar JAX array (not a Python int) so this
+        remains traceable inside jax.jit / jax.lax.scan.
+        """
+        center = self._basin_pos[basin_idx]  # (3,) via dynamic indexing
+        return jnp.linalg.norm(points - center, axis=-1)
+
     def _sigmoid_pair(self, dist: jnp.ndarray, midpoint: jnp.ndarray) -> jnp.ndarray:
         eps = self.reward_epsilon
         r = 1.0 / (1.0 + jnp.exp(self.steepness * (dist - midpoint)))
         return jnp.where(r < eps, 0.0, r)
 
     def __call__(self, x0_hat: jnp.ndarray, current_state: jnp.ndarray) -> jnp.ndarray:
-        # r_pos: closest basin to current EE.
+        # Anchor everything to the basin closest to the robot's current EE.
         dist_cur, j_cur = self._nearest_basin_dist_and_idx(
             current_state[self.dim_slice][None])  # (1,), (1,)
         mid_cur = self._basin_midpoints[j_cur]
         r_pos = self._sigmoid_pair(dist_cur, mid_cur)
 
+        j = j_cur.squeeze()  # scalar JAX array, safe inside jit
         if self.reduction == "endpoint":
-            # Each particle: closest basin to predicted endpoint.
-            d_traj, j_traj = self._nearest_basin_dist_and_idx(x0_hat[:, -1, self.dim_slice])
-            mid_traj = self._basin_midpoints[j_traj]
-            r_traj = self._sigmoid_pair(d_traj, mid_traj)
+            d_traj = self._dist_to_basin(x0_hat[:, -1, self.dim_slice], j)
+            r_traj = self._sigmoid_pair(d_traj, mid_cur)
             dist_for_drift = d_traj
         else:
-            # Each (particle, time): closest basin at that waypoint.
-            d_step, j_step = self._nearest_basin_dist_and_idx(
-                x0_hat[:, :, self.dim_slice])  # (k, H), (k, H)
+            d_step = self._dist_to_basin(x0_hat[:, :, self.dim_slice], j)  # (k, H)
             if self.reduction == "max":
                 dist_for_drift = d_step.max(axis=-1)
-                h_star = jnp.argmax(d_step, axis=-1)
-                k = d_step.shape[0]
-                row = jnp.arange(k)
-                j_star = j_step[row, h_star]
-                mid_star = self._basin_midpoints[j_star]
-                r_traj = self._sigmoid_pair(dist_for_drift, mid_star)
             else:
                 dist_for_drift = d_step.mean(axis=-1)
-                mid_step = self._basin_midpoints[j_step]
-                r_step = self._sigmoid_pair(d_step, mid_step)
-                r_traj = r_step.mean(axis=-1)
+            r_traj = self._sigmoid_pair(dist_for_drift, mid_cur)
 
         reward = r_pos * r_traj
 
