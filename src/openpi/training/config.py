@@ -377,25 +377,35 @@ class LeRobotCollabDataConfig(DataConfigFactory):
     # Default prompt when no per-episode task description is available.
     default_prompt: str = "<control_mode> end effector <control_mode> perform the collaborative task"
 
+    # If True, expect a per-frame ``turn`` label in the LeRobot dataset and apply
+    # PadWaitingChunks so waiting-phase action chunks hold through the horizon.
+    # Requires base_config.action_sequence_keys to include ``turn``.
+    pad_waiting_chunks: bool = False
 
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
         # Repack: map LeRobot dataset keys → keys expected by CollabInputs.
-        # The LeRobot dataset keys come from the convert script's `features` dict
-        # and the `add_frame` call (prefixed with "observation/" by LeRobot for non-action fields).
-        repack_transform = _transforms.Group(
-            inputs=[
-                _transforms.RepackTransform(
-                    {
-                        "observation/mount_image": "mount_image",
-                        "observation/gripper_image": "gripper_image",
-                        "observation/state": "state",
-                        "actions": "actions",
-                        "prompt": "prompt",
-                    }
-                )
-            ]
-        )
+        # Dataset keys come from the convert script's `features` / `add_frame`
+        # (mount_image, gripper_image, state, actions[, turn]); we rename the
+        # observation fields to the observation/* paths CollabInputs expects.
+        repack_structure = {
+            "observation/mount_image": "mount_image",
+            "observation/gripper_image": "gripper_image",
+            "observation/state": "state",
+            "actions": "actions",
+            "prompt": "prompt",
+        }
+        if self.pad_waiting_chunks:
+            repack_structure["turn"] = "turn"
+
+        repack_inputs: list[_transforms.DataTransformFn] = [
+            _transforms.RepackTransform(repack_structure)
+        ]
+        if self.pad_waiting_chunks:
+            # Runs on absolute 8D actions, before CollabInputs / DeltaActions.
+            repack_inputs.append(_transforms.PadWaitingChunks())
+
+        repack_transform = _transforms.Group(inputs=repack_inputs)
 
         data_transforms = _transforms.Group(
             inputs=[collab_policy.CollabInputs(model_type=model_config.model_type)],
@@ -1173,6 +1183,25 @@ _CONFIGS = [
         data=LeRobotCollabDataConfig(
             repo_id="local/paper_ready_handover",
             base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=25000,
+        save_interval=25000,
+    ),
+    TrainConfig(
+        name="pi05_paper_ready_handover_padded",
+        project_name="Paper Ready Handover",
+        wandb_entity="RT2-DIFFUSE",
+        wandb_group="OpenPI (Paper Ready Handover Padded)",
+        wandb_tags=("openpi", "paper_ready_handover", "pi05", "padded", "rebuttal"),
+        model=pi0_config.Pi0Config(pi05=True, action_dim=32, action_horizon=16),
+        data=LeRobotCollabDataConfig(
+            repo_id="local/paper_ready_handover_turn",
+            pad_waiting_chunks=True,
+            base_config=DataConfig(
+                prompt_from_task=True,
+                action_sequence_keys=("actions", "turn"),
+            ),
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         num_train_steps=25000,

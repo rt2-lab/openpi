@@ -20,7 +20,7 @@
 # CHTC uses "universe = container" with nvidia-docker support.
 # Replace <dockerhub_user> with your DockerHub username.
 universe                = container
-container_image         = docker://lexu27/openpi_train:paper-ready-handover
+container_image         = docker://lexu27/openpi_train:padded
 
 # Your CHTC NetID (used for login/auth only). Override at submit-time if desired:
 #   condor_submit chtc/train.sub netid=lpxu
@@ -32,7 +32,7 @@ executable              = chtc/run_train.sh
 # --- Arguments ---
 # These can be overridden at submit time:
 #   condor_submit train.sub config_name=pi0_collab exp_name=my_exp
-config_name             = pi05_paper_ready_handover
+config_name             = pi05_paper_ready_handover_padded
 # Default to unique run name per cluster so each submission writes to a new
 # staging directory (no collision with previous runs).
 exp_name                = pi05_$(Cluster)
@@ -49,14 +49,23 @@ getenv                  = True
 
 # Input: LeRobot dataset from shared group staging.
 # The dataset tarball will be extracted inside the job by run_train.sh.
-# Also transfer any small config overrides from /home if needed.
-transfer_input_files    = file:///staging/groups/hagenow_group/paper_ready_handover_dataset.tar.gz
+#
+# Must match the repo_id the config asks for, or the job dies at dataset load.
+# stage_data.sh names the tarball <dataset_name>_dataset.tar.gz, so override
+# alongside config_name:
+#   condor_submit chtc/train.sub config_name=pi05_paper_ready_handover_padded \
+#       exp_name=padded dataset_name=paper_ready_handover_turn
+dataset_name            = paper_ready_handover_turn
+transfer_input_files    = file:///staging/groups/hagenow_group/$(dataset_name)_dataset.tar.gz
 
 # Transfer one checkpoint bundle file.
 # run_train.sh creates checkpoint_bundle.tar after training and on TERM/EXIT.
 # This avoids directory URL remap edge-cases for large checkpoint trees.
 transfer_output_files   = checkpoint_bundle.tar
-transfer_output_remaps  = "checkpoint_bundle.tar = file:///staging/groups/hagenow_group/openpi/$(config_name).tar"
+# Name the bundle by exp_name, not config_name: chtc/pull_checkpoints.sh looks for
+# openpi/<exp_name>.tar, and keying on config_name would also make two runs of the
+# same config overwrite each other.
+transfer_output_remaps  = "checkpoint_bundle.tar = file:///staging/groups/hagenow_group/openpi/$(exp_name).tar"
 
 # --- Logging ---
 log                     = logs/train_$(Cluster).log

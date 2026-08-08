@@ -219,7 +219,8 @@ def _fused_fk(model, encode_prefix_jit, observation, rng, fk_config,
         resample_mask[s] = True
     resample_mask_j = jnp.array(resample_mask)
 
-    prefix_mask, kv_cache = encode_prefix_jit(observation)
+    prefix_out, prefix_mask, kv_cache = encode_prefix_jit(observation)
+    del prefix_out  # unused by FK; retained for gate / embedding export callers
     kv_cache_k = jax.tree.map(
         lambda x: jnp.broadcast_to(x, (x.shape[0], k, *x.shape[2:])), kv_cache)
     pfx_mask_k = jnp.broadcast_to(prefix_mask, (k, prefix_mask.shape[1]))

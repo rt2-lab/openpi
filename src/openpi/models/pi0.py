@@ -298,19 +298,20 @@ class Pi0(_model.BaseModel):
     def _encode_prefix(
         self,
         observation: _model.Observation,
-    ) -> tuple[at.Bool[at.Array, "1 s"], at.PyTree]:
-        """Encode prefix (vision + text) into a KV cache. Batch=1.
+    ) -> tuple[at.Float[at.Array, "1 s emb"], at.Bool[at.Array, "1 s"], at.PyTree]:
+        """Encode prefix (vision + text) into hidden states + a KV cache. Batch=1.
 
-        Factored out so it can be JIT-compiled independently for FK steering.
+        Factored out so it can be JIT-compiled independently for FK steering and
+        the wait/go gate (which mean-pools ``prefix_out``).
         """
         observation = _model.preprocess_observation(None, observation, train=False)
         prefix_tokens, prefix_mask, prefix_ar_mask = self.embed_prefix(observation)
         prefix_attn_mask = make_attn_mask(prefix_mask, prefix_ar_mask)
         positions = jnp.cumsum(prefix_mask, axis=1) - 1
-        _, kv_cache = self.PaliGemma.llm(
+        (prefix_out, _), kv_cache = self.PaliGemma.llm(
             [prefix_tokens, None], mask=prefix_attn_mask, positions=positions,
         )
-        return prefix_mask, kv_cache
+        return prefix_out, prefix_mask, kv_cache
 
     def sample_actions_batch(
         self,
@@ -325,7 +326,7 @@ class Pi0(_model.BaseModel):
         Encodes the prefix once at batch=1, then broadcasts the KV cache
         to batch=N so only the denoising loop pays the batch cost.
         """
-        prefix_mask, kv_cache = self._encode_prefix(observation)
+        _, prefix_mask, kv_cache = self._encode_prefix(observation)
         dt = -1.0 / num_steps
 
         kv_cache = jax.tree.map(

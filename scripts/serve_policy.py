@@ -58,7 +58,12 @@ class Args:
     record: bool = False
 
     # Precompute adaRMS modulations for pi0.5 (faster inference, same output).
-    tabulate_adarms: bool = True 
+    tabulate_adarms: bool = True
+
+    # Optional wait/go gate (directory containing gate_head.pt + embed_norm.json).
+    gate_checkpoint: str | None = None
+    # Override P(move) HOLD threshold; default comes from gate_head.pt.
+    gate_threshold: float | None = None
 
     # Specifies how to load the policy. If not provided, the default policy for the environment will be used.
     policy: Checkpoint | Default = dataclasses.field(default_factory=Default)
@@ -104,6 +109,7 @@ def create_policy(args: Args) -> _policy.Policy:
             return _policy_config.create_trained_policy(
                 _config.get_config(args.policy.config), args.policy.dir,
                 default_prompt=args.default_prompt, tabulate_adarms=args.tabulate_adarms,
+                gate_checkpoint=args.gate_checkpoint, gate_threshold=args.gate_threshold,
             )
         case Default():
             return create_default_policy(
