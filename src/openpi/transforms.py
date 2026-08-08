@@ -201,6 +201,35 @@ class SubsampleActions(DataTransformFn):
 
 
 @dataclasses.dataclass(frozen=True)
+class PadWaitingChunks(DataTransformFn):
+    """Remove demonstration action leakage from waiting-phase targets.
+
+    When the chunk starts in a waiting phase (turn[0] == 0), every action at/after
+    the first transition to motion is replaced by the last pre-transition action
+    so the target holds for the full horizon. Chunks that start while moving are
+    left alone. ``turn`` is popped so it does not leak into later transforms.
+    At inference there is no ``turn`` key and this is a no-op.
+    """
+
+    def __call__(self, data: DataDict) -> DataDict:
+        turn = data.pop("turn", None)
+        if turn is None or "actions" not in data:
+            return data
+        turn = np.asarray(turn).reshape(-1)
+        if turn.size == 0 or turn[0] != 0:
+            return data
+        diff = np.flatnonzero(turn != turn[0])
+        if diff.size == 0:
+            return data
+        b = int(diff[0])
+        hold = data["actions"][b - 1] if b > 0 else data["actions"][0]
+        actions = np.array(data["actions"], copy=True)
+        actions[b:] = hold
+        data["actions"] = actions
+        return data
+
+
+@dataclasses.dataclass(frozen=True)
 class DeltaActions(DataTransformFn):
     """Repacks absolute actions into delta action space."""
 

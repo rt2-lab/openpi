@@ -18,6 +18,7 @@ Usage:
       --default_task "collaborative handover task"
 """
 
+import gc
 import glob
 import os
 import shutil
@@ -60,6 +61,7 @@ def main(
     image_writer_threads: int = 10,
     image_writer_processes: int = 0,
     write_drain_interval: int = 64,
+    decode_batch: int = 128,
 ):
     """
     Args:
@@ -74,6 +76,8 @@ def main(
         image_writer_threads / image_writer_processes: LeRobot's async image writer pool. Processes=0
             uses threads only (PIL.save releases the GIL; avoids pickle copy overhead).
         write_drain_interval: Drain LeRobot's write queue every N frames to bound memory.
+        decode_batch: Decode/queue this many frames at a time. Bounds peak RAM; long
+            episodes otherwise hold every decoded frame at once.
     """
     output_path = HF_LEROBOT_HOME / repo_name
     if output_path.exists():
@@ -110,6 +114,13 @@ def main(
                 "shape": (8,),
                 "names": ["actions"],
             },
+            # Optional binary wait/move gate (1=move, 0=wait). Present when the
+            # HDF5 was labelled with add_turn_labels.py; otherwise filled with -1.
+            "turn": {
+                "dtype": "float32",
+                "shape": (1,),
+                "names": ["turn"],
+            },
         },
         image_writer_threads=image_writer_threads,
         image_writer_processes=image_writer_processes,
@@ -128,6 +139,10 @@ def main(
             desired_pose = np.array(f["robot_desired_pose"][:], dtype=np.float32)
             gripper_act = np.array(f["gripper_actual_position"][:], dtype=np.float32)
             gripper_cmd = np.array(f["gripper_commanded_position"][:], dtype=np.float32)
+            if "turn" in f:
+                turn = np.array(f["turn"][:], dtype=np.float32).reshape(-1, 1)
+            else:
+                turn = np.full((ep_len, 1), -1.0, dtype=np.float32)
 
             if gripper_act.ndim == 1:
                 gripper_act = gripper_act[:, np.newaxis]
@@ -137,34 +152,50 @@ def main(
             states = np.concatenate([robot_pose, gripper_act], axis=1)
             actions = np.concatenate([desired_pose, gripper_cmd], axis=1)
 
-            decode_args = [
-                (
-                    bytes(f["gripper_image_rgb_compressed"][i]),
-                    bytes(f["mount_image_rgb_compressed"][i]),
-                    image_size[0],
-                    image_size[1],
-                )
-                for i in indices
-            ]
+            # Decode in bounded batches. Submitting a whole episode at once holds
+            # every decoded frame in RAM (~700 MB for a long episode) on top of
+            # LeRobot's own buffers, which is enough to get the process OOM-killed.
+            j = 0
+            for start in range(0, len(indices), decode_batch):
+                batch = indices[start : start + decode_batch]
+                decode_args = [
+                    (
+                        bytes(f["gripper_image_rgb_compressed"][i]),
+                        bytes(f["mount_image_rgb_compressed"][i]),
+                        image_size[0],
+                        image_size[1],
+                    )
+                    for i in batch
+                ]
+                if pool is not None:
+                    decoded = list(pool.map(_decode_images, decode_args, chunksize=8))
+                else:
+                    decoded = [_decode_images(a) for a in decode_args]
 
-        if pool is not None:
-            decoded = pool.map(_decode_images, decode_args, chunksize=8)
-        else:
-            decoded = map(_decode_images, decode_args)
+                for (gripper_img, mount_img) in decoded:
+                    dataset.add_frame(
+                        {
+                            "mount_image": mount_img,
+                            "gripper_image": gripper_img,
+                            "state": states[indices[j]],
+                            "actions": actions[indices[j]],
+                            # Sampled with the same downsample indices as the poses —
+                            # do not recompute labels at the target fps.
+                            "turn": turn[indices[j]],
+                            "task": default_task,
+                        }
+                    )
+                    j += 1
+                    if j % write_drain_interval == 0:
+                        dataset._wait_image_writer()
+                del decoded, decode_args
 
-        for j, (gripper_img, mount_img) in enumerate(decoded):
-            dataset.add_frame(
-                {
-                    "mount_image": mount_img,
-                    "gripper_image": gripper_img,
-                    "state": states[indices[j]],
-                    "actions": actions[indices[j]],
-                    "task": default_task,
-                }
-            )
-            if (j + 1) % write_drain_interval == 0:
-                dataset._wait_image_writer()
         dataset.save_episode()
+        # save_episode concatenates each episode (with embedded images) onto an
+        # in-memory hf_dataset that this script never reads, costing ~150 KB per
+        # frame until the process is OOM-killed. Reset it to keep RSS flat.
+        dataset.hf_dataset = dataset.create_hf_dataset()
+        gc.collect()
 
     if pool is not None:
         pool.shutdown()

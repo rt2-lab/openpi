@@ -65,6 +65,8 @@ class Policy(BasePolicy):
         metadata: dict[str, Any] | None = None,
         pytorch_device: str = "cpu",
         is_pytorch: bool = False,
+        gate_checkpoint: pathlib.Path | str | None = None,
+        gate_threshold: float | None = None,
     ):
         """Initialize the Policy.
 
@@ -78,6 +80,11 @@ class Policy(BasePolicy):
             pytorch_device: Device to use for PyTorch models (e.g., "cpu", "cuda:0").
                           Only relevant when is_pytorch=True.
             is_pytorch: Whether the model is a PyTorch model. If False, assumes JAX model.
+            gate_checkpoint: Optional path to a wait/go ``gate_head.pt`` (plus sibling
+                ``embed_norm.json``). When set, ``infer`` mean-pools the prefix embedding,
+                runs the BCE head, and skips denoising on HOLD.
+            gate_threshold: Override the threshold stored in ``gate_head.pt``.
+                HOLD when P(move) < threshold.
         """
         self._model = model
         self._input_transform = _transforms.compose(transforms)
@@ -86,6 +93,10 @@ class Policy(BasePolicy):
         self._metadata = metadata or {}
         self._is_pytorch_model = is_pytorch
         self._pytorch_device = pytorch_device
+        self._gate_head = None
+        self._gate_mean = None
+        self._gate_std = None
+        self._gate_threshold = None
 
         if self._is_pytorch_model:
             self._model = self._model.to(pytorch_device)
@@ -117,6 +128,72 @@ class Policy(BasePolicy):
             self._rng = rng or jax.random.key(0)
             self._jax_output_params = _extract_jax_output_params(self._output_transform)
 
+        if gate_checkpoint is not None:
+            self._load_gate(pathlib.Path(gate_checkpoint), gate_threshold)
+
+    def _load_gate(self, gate_checkpoint: pathlib.Path, threshold: float | None) -> None:
+        """Load HardGateHead weights + embedding norm from an export directory or .pt file."""
+        ckpt_path = gate_checkpoint
+        if ckpt_path.is_dir():
+            ckpt_path = ckpt_path / "gate_head.pt"
+        if not ckpt_path.exists():
+            raise FileNotFoundError(f"Gate checkpoint not found: {ckpt_path}")
+
+        payload = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+        input_dim = int(payload["input_dim"])
+        hidden_dim = int(payload.get("hidden_dim", 256))
+        # Load gate.py by path: importing aiml_ws.models pulls in the whole
+        # diffusion policy stack, which openpi's venv does not have.
+        import importlib.util
+        gate_src = payload.get("gate_source")
+        if gate_src is None:
+            # policy.py lives at <research>/openpi/src/openpi/policies/policy.py
+            gate_src = pathlib.Path(__file__).resolve().parents[4] / "aiml_ws" / "models" / "gate.py"
+        gate_src = pathlib.Path(gate_src)
+        if not gate_src.exists():
+            raise FileNotFoundError(f"Cannot locate gate.py for HardGateHead: {gate_src}")
+        spec = importlib.util.spec_from_file_location("aiml_gate", gate_src)
+        gate_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gate_mod)
+        HardGateHead = gate_mod.HardGateHead
+
+        head = HardGateHead(input_dim=input_dim, hidden_dim=hidden_dim)
+        head.load_state_dict(payload["state_dict"])
+        head.eval()
+        self._gate_head = head
+        self._gate_threshold = float(
+            threshold if threshold is not None else payload.get("threshold", 0.5)
+        )
+
+        norm_path = ckpt_path.parent / "embed_norm.json"
+        if not norm_path.exists():
+            raise FileNotFoundError(f"Missing embed_norm.json next to {ckpt_path}")
+        import json
+        norm = json.loads(norm_path.read_text())
+        self._gate_mean = np.asarray(norm["mean"], dtype=np.float32)
+        self._gate_std = np.asarray(norm["std"], dtype=np.float32)
+        logging.info(
+            "Loaded wait/go gate from %s (threshold=%.3f, dim=%d)",
+            ckpt_path, self._gate_threshold, input_dim,
+        )
+
+    def _gate_prob_from_prefix(self, prefix_out, prefix_mask) -> float:
+        """Return P(move) from a mean-pooled prefix embedding.
+
+        Pooling happens on device so only the 2048-d vector crosses to the host,
+        and must match _mean_pool_jax in scripts/export_prefix_embeddings.py.
+        """
+        assert self._gate_head is not None
+        mask = jnp.asarray(prefix_mask).astype(jnp.float32)[..., None]
+        pooled_j = (jnp.asarray(prefix_out).astype(jnp.float32) * mask).sum(axis=1) / jnp.maximum(
+            mask.sum(axis=1), 1.0
+        )
+        pooled = np.asarray(pooled_j, dtype=np.float32)[0]
+        z = (pooled - self._gate_mean) / self._gate_std
+        with torch.no_grad():
+            logit = self._gate_head(torch.from_numpy(z[None].astype(np.float32)))
+            return float(torch.sigmoid(logit).item())
+
     @override
     def infer(self, obs: dict, *, noise: np.ndarray | None = None) -> dict:  # type: ignore[misc]
         # Make a copy since transformations may modify the inputs in place.
@@ -142,7 +219,43 @@ class Policy(BasePolicy):
 
         observation = _model.Observation.from_dict(inputs)
         start_time = time.monotonic()
-        actions = self._sample_actions(sample_rng_or_pytorch_device, observation, **sample_kwargs)
+
+        gate_prob = None
+        # Optional wait/go shortcut: encode prefix once, HOLD without denoising.
+        if (
+            self._gate_head is not None
+            and not self._is_pytorch_model
+            and self._encode_prefix_jit is not None
+            and self._denoise_segment_jit is not None
+        ):
+            prefix_out, prefix_mask, kv_cache = self._encode_prefix_jit(observation)
+            gate_prob = self._gate_prob_from_prefix(prefix_out, prefix_mask)
+            if gate_prob < self._gate_threshold:
+                model_time = time.monotonic() - start_time
+                return {
+                    "state": np.asarray(inputs["state"][0, ...]),
+                    "actions": None,
+                    "gate_prob": gate_prob,
+                    "policy_timing": {"infer_ms": model_time * 1000},
+                }
+            # GO: denoise reusing the KV cache from the gate encode.
+            num_steps = int(sample_kwargs.get("num_steps", 10))
+            dt = -1.0 / num_steps
+            if "noise" in sample_kwargs:
+                noise_j = sample_kwargs["noise"]
+            else:
+                self._rng, noise_rng = jax.random.split(self._rng)
+                noise_j = jax.random.normal(
+                    noise_rng,
+                    (1, self._model.action_horizon, self._model.action_dim),
+                )
+            actions, _ = self._denoise_segment_jit(
+                observation, prefix_mask, kv_cache, noise_j, 1.0, num_steps, dt, 1,
+            )
+            sample_rng_or_pytorch_device = None  # unused below
+        else:
+            actions = self._sample_actions(sample_rng_or_pytorch_device, observation, **sample_kwargs)
+
         model_time = time.monotonic() - start_time
 
         outputs = {
@@ -158,6 +271,8 @@ class Policy(BasePolicy):
         outputs["policy_timing"] = {
             "infer_ms": model_time * 1000,
         }
+        if gate_prob is not None:
+            outputs["gate_prob"] = gate_prob
         return outputs
 
     def infer_fk(self, obs: dict, fk_config: dict) -> dict:
