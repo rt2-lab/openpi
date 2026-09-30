@@ -1188,6 +1188,23 @@ _CONFIGS = [
         num_train_steps=25000,
         save_interval=25000,
     ),
+    # Isaac sim light-then-grab task for the FK-steering sensitivity sweep
+    # (demos from vla-shared-autonomy/scripts/collect.py, converted with examples/collab).
+    TrainConfig(
+        name="pi05_sim_lightcube",
+        project_name="Sim Light Cube",
+        wandb_entity="RT2-DIFFUSE",
+        wandb_group="OpenPI (Sim Light Cube)",
+        wandb_tags=("openpi", "sim_lightcube", "pi05"),
+        model=pi0_config.Pi0Config(pi05=True, action_dim=32, action_horizon=16),
+        data=LeRobotCollabDataConfig(
+            repo_id="local/sim_lightcube",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=25000,
+        save_interval=25000,
+    ),
     TrainConfig(
         name="pi05_paper_ready_handover_padded",
         project_name="Paper Ready Handover",

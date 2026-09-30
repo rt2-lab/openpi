@@ -6,6 +6,7 @@ denoising steps.  Uses difference_potential only for resampling weights.
 """
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Callable
 
@@ -26,7 +27,9 @@ from openpi.models.pi0 import make_attn_mask
 
 logger = logging.getLogger(__name__)
 
-_fused_fn_cache: dict[int, Callable] = {}
+# fk_config values (λ, M, reward params, basins) are baked into the jitted closure as constants,
+# so the cache key must include them; otherwise later configs silently reuse the first one.
+_fused_fn_cache: dict[tuple, Callable] = {}
 
 
 def fk_sample_actions(
@@ -205,9 +208,10 @@ def _build_fused_fn(model, fk_config, jax_output_params, num_steps):
 
 def _fused_fk(model, encode_prefix_jit, observation, rng, fk_config,
               raw_state, num_steps, resample_steps, k, jax_output_params):
-    cache_key = id(model)
+    cache_key = (id(model), num_steps, json.dumps(fk_config, sort_keys=True, default=float))
     if cache_key not in _fused_fn_cache:
-        logger.info("Building fused FK JIT function (first call, will compile on use)")
+        logger.info("Building fused FK JIT function for a new fk_config (will compile on use)")
+        _fused_fn_cache.clear()  # keep only the current config's executable
         _fused_fn_cache[cache_key] = _build_fused_fn(
             model, fk_config, jax_output_params, num_steps)
     call_fn = _fused_fn_cache[cache_key]
